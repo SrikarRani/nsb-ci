@@ -110,14 +110,12 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
             -DABSL_ENABLE_INSTALL=ON \
-            -DCMAKE_INSTALL_PREFIX="${RUNNER_TEMP}/absl-install"
+            -DCMAKE_INSTALL_PREFIX="/usr/local"
           cmake --build "${RUNNER_TEMP}/abseil-build"
-          cmake --install "${RUNNER_TEMP}/abseil-build"
+          sudo cmake --install "${RUNNER_TEMP}/abseil-build"
 
       - name: Build and install NSB under /usr/local
         working-directory: nsb
-        env:
-          CMAKE_PREFIX_PATH: ${{ format('{0}/absl-install', runner.temp) }}
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
