@@ -9,4 +9,4 @@ Version: @PROJECT_VERSION@
 URL: @PROJECT_HOMEPAGE_URL@
 Requires: protobuf >= 3.0, absl_log_internal_check_op, absl_log_initialize, yaml-cpp, hiredis
 Libs: -L${libdir} -lnsb
-Cflags: -I${includedir}
+Cflags: -I${includedir} -I${includedir}/proto

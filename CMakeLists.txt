@@ -27,6 +27,7 @@ set(CPP_DIR "${CMAKE_SOURCE_DIR}/cpp")
 set(CPP_SRC_DIR "${CPP_DIR}/src")
 set(CPP_INCLUDE_DIR "${CPP_DIR}/include")
 set(CPP_PROTO_DIR "${CPP_DIR}/proto")
+set(CPP_PROTO_GEN_INCLUDE_DIR "${CPP_PROTO_DIR}/proto")
 set(PYTHON_DIR "${CMAKE_SOURCE_DIR}/python")
 set(PROTO_DIR "${CMAKE_SOURCE_DIR}/proto")
 message(STATUS "C++ directory: ${CPP_DIR}")
@@ -85,6 +86,7 @@ target_link_libraries(nsb PUBLIC
 target_include_directories(nsb PUBLIC
     ${CPP_INCLUDE_DIR}
     ${CPP_PROTO_DIR}
+    ${CPP_PROTO_GEN_INCLUDE_DIR}
     ${Protobuf_INCLUDE_DIRS}
     ${YAML_CPP_INCLUDE_DIR}
 )
@@ -103,12 +105,12 @@ protobuf_generate(
     TARGET nsb
     LANGUAGE python
     IMPORT_DIRS ${PROTO_DIR}
-    PROTOC_OUT_DIR ${PYTHON_DIR}/proto
+    PROTOC_OUT_DIR ${PYTHON_DIR}
     PROTOS ${PROTO_DIR}/nsb.proto
 )
 # Cleaning up.
 set_target_properties(nsb PROPERTIES ADDITIONAL_CLEAN_FILES
-    "${CPP_DIR}/proto/*;${PYTHON_DIR}/proto/*;${PYTHON_DIR}/__pycache__/*"
+    "${CPP_DIR}/proto/proto/*;${PYTHON_DIR}/proto/nsb_pb2.py;${PYTHON_DIR}/proto/__pycache__/*;${PYTHON_DIR}/__pycache__/*"
 )
 
 # Compile daemon executable.
@@ -119,6 +121,7 @@ target_link_libraries(nsb_daemon PUBLIC nsb)
 target_include_directories(nsb_daemon PUBLIC 
     ${CPP_INCLUDE_DIR}
     ${CPP_PROTO_DIR}
+    ${CPP_PROTO_GEN_INCLUDE_DIR}
     ${Protobuf_INCLUDE_DIRS}
     ${YAML_CPP_INCLUDE_DIR}
 )
@@ -172,6 +175,7 @@ add_executable(nsb_test ${CPP_DIR}/nsb_test.cc)
 target_link_libraries(nsb_test PUBLIC nsb)
 target_include_directories(nsb_test PUBLIC 
     ${CPP_INCLUDE_DIR}
+    ${CPP_PROTO_GEN_INCLUDE_DIR}
     ${Protobuf_INCLUDE_DIRS}
     ${YAML_CPP_INCLUDE_DIR}
 )
