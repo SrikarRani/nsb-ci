@@ -70,6 +70,10 @@ jobs:
       MAX_AVG_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_cpu_percent || '' }}
       MAX_PEAK_MEMORY_MB: ${{ github.event_name == 'workflow_dispatch' && inputs.max_peak_memory_mb || '' }}
       MAX_DROP_RATE_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_drop_rate_percent || '' }}
+      CCACHE_DIR: ${{ github.workspace }}/.ccache
+      CCACHE_BASEDIR: ${{ github.workspace }}
+      CCACHE_COMPILERCHECK: content
+      CCACHE_MAXSIZE: 750M
 
     steps:
       - name: Check out NSB
@@ -93,6 +97,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y \
             build-essential \
+            ccache \
             cmake \
             ninja-build \
             pkg-config \
@@ -103,6 +108,19 @@ jobs:
             libhiredis-dev \
             python3-venv \
             python3-pip
+
+      - name: Restore compiler cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CCACHE_DIR }}
+          key: ccache-perf-${{ runner.os }}-${{ env.NS3_REF }}-${{ hashFiles('nsb/CMakeLists.txt', 'nsb/cpp/**/*.cc', 'nsb/cpp/**/*.h', 'nsb/proto/**/*.proto', 'nsb/examples/ns3/**/*.cc', 'nsb/.github/workflows/fork-performance.yml') }}
+          restore-keys: |
+            ccache-perf-${{ runner.os }}-${{ env.NS3_REF }}-
+
+      - name: Reset ccache stats
+        run: |
+          ccache --zero-stats || true
+          ccache --show-config || true
 
       - name: Install modern Abseil on Linux
         run: |
@@ -177,6 +195,9 @@ jobs:
 
       - name: Configure and build ns-3
         working-directory: ns-3-dev
+        env:
+          CC: "ccache gcc"
+          CXX: "ccache g++"
         run: |
           ./ns3 configure --build-profile=release --enable-examples --disable-tests
           ./ns3 build
@@ -193,10 +214,10 @@ jobs:
             --duration "$DURATION" \
             --output-root ./results \
             --summary-csv ./results/perf_summary.csv \
-            --capture-arg "--daemon-cmd" \
-            --capture-arg "./build/nsb_daemon config-ns3-perf.yaml" \
-            --capture-arg "--ns3-cmd" \
-            --capture-arg "./ns3 run nsb-testing-tcp"
+            --capture-arg=--daemon-cmd \
+            --capture-arg="./build/nsb_daemon config-ns3-perf.yaml" \
+            --capture-arg=--ns3-cmd \
+            --capture-arg="./ns3 run nsb-testing-tcp"
 
       - name: Run manual performance sweep
         if: github.event_name == 'workflow_dispatch'
@@ -208,10 +229,10 @@ jobs:
             --nodes "$NODES" \
             --rates "$RATES" \
             --duration "$DURATION" \
-            --capture-arg "--daemon-cmd" \
-            --capture-arg "./build/nsb_daemon config-ns3-perf.yaml" \
-            --capture-arg "--ns3-cmd" \
-            --capture-arg "./ns3 run nsb-testing-tcp"
+            --capture-arg=--daemon-cmd \
+            --capture-arg="./build/nsb_daemon config-ns3-perf.yaml" \
+            --capture-arg=--ns3-cmd \
+            --capture-arg="./ns3 run nsb-testing-tcp"
 
       - name: Generate performance plots
         working-directory: nsb-ns3-perf-testing
@@ -229,6 +250,18 @@ jobs:
             --output perf-summary.md \
             --title "NSB Performance Summary"
           cat perf-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Append ccache stats
+        if: always()
+        run: |
+          {
+            echo ""
+            echo "## Ccache Summary"
+            echo ""
+            echo '```text'
+            ccache --show-stats || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce optional thresholds
         run: >
