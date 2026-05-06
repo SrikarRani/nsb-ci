@@ -125,14 +125,28 @@ jobs:
       - name: Clone ns-3
         run: git clone --depth 1 --branch "$NS3_REF" https://gitlab.com/nsnam/ns-3-dev.git ns-3-dev
 
+      - name: Locate generated NSB protobuf headers
+        shell: bash
+        run: |
+          proto_header="$(find "${GITHUB_WORKSPACE}/nsb" -name nsb.pb.h | head -n1 || true)"
+          if [[ -z "${proto_header}" && -d /usr/local/nsb/include ]]; then
+            proto_header="$(find /usr/local/nsb/include -name nsb.pb.h | head -n1 || true)"
+          fi
+          if [[ -z "${proto_header}" ]]; then
+            echo "Could not locate nsb.pb.h after NSB build/install" >&2
+            find "${GITHUB_WORKSPACE}/nsb" -maxdepth 5 -type d | sort >&2 || true
+            exit 1
+          fi
+          echo "NSB_PROTO_INCLUDE_DIR=$(dirname "${proto_header}")" >> "$GITHUB_ENV"
+
       - name: Install ns-3 scratch overlay
         shell: bash
         run: |
           mkdir -p ns-3-dev/scratch/nsb-perf
           cat > ns-3-dev/scratch/nsb-perf/CMakeLists.txt <<'EOF'
           set(NSB_SIM_SOURCE "${PROJECT_SOURCE_DIR}/../nsb/examples/ns3/nsb-testing-tcp.cc")
-          set(NSB_SOURCE_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/../nsb/cpp/include")
-          set(NSB_SOURCE_PROTO_INCLUDE_DIR "${PROJECT_SOURCE_DIR}/../nsb/cpp/proto/proto")
+          set(NSB_SOURCE_INCLUDE_DIR "$ENV{GITHUB_WORKSPACE}/nsb/cpp/include")
+          set(NSB_SOURCE_PROTO_INCLUDE_DIR "$ENV{NSB_PROTO_INCLUDE_DIR}")
 
           if(NOT EXISTS "${NSB_SIM_SOURCE}")
             message(FATAL_ERROR "NSB simulation source not found: ${NSB_SIM_SOURCE}")
