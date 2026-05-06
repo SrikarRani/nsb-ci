@@ -88,6 +88,6 @@ jobs:
           python -m pip install ./python
           python - <<'PY'
           import nsb_client
-          import proto.nsb_pb2
-          print(f"Imported {nsb_client.__name__} and proto.nsb_pb2 successfully")
+          import nsb_proto.nsb_pb2
+          print(f"Imported {nsb_client.__name__} and nsb_proto.nsb_pb2 successfully")
           PY

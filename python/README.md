@@ -11,7 +11,7 @@ project.
 
 If you want to install the package in development mode and want it to be 
 accessible to other project spaces, first build NSB once from the repo root so
-that `python/proto/nsb_pb2.py` is generated, then install it from this
+that `python/nsb_proto/nsb_pb2.py` is generated, then install it from this
 directory:
 ```bash
 pip install -e .

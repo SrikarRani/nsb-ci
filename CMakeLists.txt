@@ -16,9 +16,9 @@ project(nsb
 # Set standard install directories.
 include(GNUInstallDirs)
 
-# Make cpp/proto and python/proto directories.
+# Make cpp/proto and python package directories.
 file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/cpp/proto)
-file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/python/proto)
+file(MAKE_DIRECTORY ${CMAKE_SOURCE_DIR}/python/nsb_proto)
 
 # Set directories as necessary.
 message(STATUS "Source directory: ${CMAKE_SOURCE_DIR}")
@@ -105,12 +105,12 @@ protobuf_generate(
     TARGET nsb
     LANGUAGE python
     IMPORT_DIRS ${PROTO_DIR}
-    PROTOC_OUT_DIR ${PYTHON_DIR}
+    PROTOC_OUT_DIR ${PYTHON_DIR}/nsb_proto
     PROTOS ${PROTO_DIR}/nsb.proto
 )
 # Cleaning up.
 set_target_properties(nsb PROPERTIES ADDITIONAL_CLEAN_FILES
-    "${CPP_DIR}/proto/proto/*;${PYTHON_DIR}/proto/nsb_pb2.py;${PYTHON_DIR}/proto/__pycache__/*;${PYTHON_DIR}/__pycache__/*"
+    "${CPP_DIR}/proto/proto/*;${PYTHON_DIR}/nsb_proto/nsb_pb2.py;${PYTHON_DIR}/nsb_proto/__pycache__/*;${PYTHON_DIR}/__pycache__/*"
 )
 
 # Compile daemon executable.
