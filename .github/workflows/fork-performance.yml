@@ -62,9 +62,10 @@ jobs:
     env:
       PERF_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.perf_repo || 'VasaviSD/nsb-ns3-perf-testing' }}
       NS3_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ns3_ref || 'master' }}
-      NODES: ${{ github.event_name == 'workflow_dispatch' && inputs.nodes || '5' }}
+      NODES: ${{ github.event_name == 'workflow_dispatch' && inputs.nodes || '5,25,50,100,200' }}
       RATES: ${{ github.event_name == 'workflow_dispatch' && inputs.rates || '10' }}
       DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '5' }}
+      PUSH_PERF_CASES: "5:10,5:50,25:50,50:100,100:100"
       MAX_AVG_RTT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_rtt_s || '' }}
       MAX_AVG_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_cpu_percent || '' }}
       MAX_PEAK_MEMORY_MB: ${{ github.event_name == 'workflow_dispatch' && inputs.max_peak_memory_mb || '' }}
@@ -180,7 +181,25 @@ jobs:
           ./ns3 configure --build-profile=release --enable-examples --disable-tests
           ./ns3 build
 
-      - name: Run performance sweep
+      - name: Run curated push perf suite
+        if: github.event_name == 'push'
+        working-directory: nsb-ns3-perf-testing
+        env:
+          NSB_NS3_BASE_DIR: ${{ github.workspace }}
+        run: |
+          python ../nsb/.github/scripts/run_perf_cases.py \
+            --perf-root . \
+            --cases "$PUSH_PERF_CASES" \
+            --duration "$DURATION" \
+            --output-root ./results \
+            --summary-csv ./results/perf_summary.csv \
+            --capture-arg "--daemon-cmd" \
+            --capture-arg "./build/nsb_daemon config-ns3-perf.yaml" \
+            --capture-arg "--ns3-cmd" \
+            --capture-arg "./ns3 run nsb-testing-tcp"
+
+      - name: Run manual performance sweep
+        if: github.event_name == 'workflow_dispatch'
         working-directory: nsb-ns3-perf-testing
         env:
           NSB_NS3_BASE_DIR: ${{ github.workspace }}
@@ -201,6 +220,15 @@ jobs:
           ./.venv/bin/python ./scripts/plot_perf_metrics.py \
             --csv ./results/perf_summary.csv \
             --out-dir ./results/plots
+
+      - name: Write readable performance summary
+        if: always()
+        run: |
+          python nsb/.github/scripts/write_perf_summary.py \
+            --csv nsb-ns3-perf-testing/results/perf_summary.csv \
+            --output perf-summary.md \
+            --title "NSB Performance Summary"
+          cat perf-summary.md >> "$GITHUB_STEP_SUMMARY"
 
       - name: Enforce optional thresholds
         run: >
