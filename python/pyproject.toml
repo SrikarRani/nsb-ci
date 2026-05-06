@@ -15,9 +15,5 @@ dependencies = [
 
 [tool.setuptools]
 py-modules = ["nsb_client"]
+packages = ["proto"]
 include-package-data = true
-
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["proto*"]
-namespaces = true
