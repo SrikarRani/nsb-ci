@@ -34,13 +34,25 @@ jobs:
             cmake \
             ninja-build \
             pkg-config \
-            libabsl-dev \
             protobuf-compiler \
             libprotobuf-dev \
             libyaml-cpp-dev \
             libhiredis-dev
 
+      - name: Install modern Abseil on Linux
+        run: |
+          git clone --depth 1 https://github.com/abseil/abseil-cpp.git "${RUNNER_TEMP}/abseil-cpp"
+          cmake -S "${RUNNER_TEMP}/abseil-cpp" -B "${RUNNER_TEMP}/abseil-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DABSL_ENABLE_INSTALL=ON \
+            -DCMAKE_INSTALL_PREFIX="${RUNNER_TEMP}/absl-install"
+          cmake --build "${RUNNER_TEMP}/abseil-build"
+          cmake --install "${RUNNER_TEMP}/abseil-build"
+
       - name: Configure CMake
+        env:
+          CMAKE_PREFIX_PATH: ${{ format('{0}/absl-install', runner.temp) }}
         run: >
           cmake -S . -B build -G Ninja
           -DCMAKE_BUILD_TYPE=Release

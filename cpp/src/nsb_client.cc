@@ -83,7 +83,10 @@ namespace nsb {
         }
         // Parse in message.
         nsb::nsbm nsbResponse = nsb::nsbm();
-        nsbResponse.ParseFromString(response);
+        if (!nsbResponse.ParseFromString(response)) {
+            LOG(ERROR) << "INIT: Failed to parse daemon response." << std::endl;
+            return;
+        }
         // Check for expected operation.
         if (nsbResponse.manifest().op() == nsb::nsbm::Manifest::INIT) {
             if (nsbResponse.manifest().code() != nsb::nsbm::Manifest::SUCCESS) {
@@ -143,7 +146,10 @@ namespace nsb {
         }
         // Parse in message.
         nsb::nsbm nsbResponse = nsb::nsbm();
-        nsbResponse.ParseFromString(response);
+        if (!nsbResponse.ParseFromString(response)) {
+            LOG(ERROR) << "PING: Failed to parse daemon response." << std::endl;
+            return false;
+        }
         // Check for expected operation.
         if (nsbResponse.manifest().op() == nsb::nsbm::Manifest::PING) {
             // Get the configuration.
@@ -239,7 +245,11 @@ namespace nsb {
             return MessageEntry();
         }
         // Parse in message.
-        nsbMsg->ParseFromString(response);
+        if (!nsbMsg->ParseFromString(response)) {
+            LOG(ERROR) << "RECV: Failed to parse daemon response." << std::endl;
+            delete nsbMsg;
+            return MessageEntry();
+        }
         nsb::nsbm::Manifest manifest = nsbMsg->manifest();
         if (manifest.op() != nsb::nsbm::Manifest::RECEIVE && manifest.op() != nsb::nsbm::Manifest::FORWARD) {
             LOG(ERROR) << "RECV: Unexpected operation over RECV channel." << std::endl;
@@ -309,7 +319,11 @@ namespace nsb {
             return MessageEntry();
         }
         // Parse in message.
-        nsbMsg->ParseFromString(response);
+        if (!nsbMsg->ParseFromString(response)) {
+            LOG(ERROR) << "FETCH: Failed to parse daemon response." << std::endl;
+            delete nsbMsg;
+            return MessageEntry();
+        }
         DLOG(INFO) << "FETCH: Response:" << std::endl << nsbMsg->DebugString();
         nsb::nsbm::Manifest manifest = nsbMsg->manifest();
         if (manifest.op() != nsb::nsbm::Manifest::FETCH && manifest.op() != nsb::nsbm::Manifest::FORWARD) {
