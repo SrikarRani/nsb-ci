@@ -1,12 +1,15 @@
 name: Fork Performance
 
 on:
+  push:
+    paths-ignore:
+      - "docs/**"
   workflow_dispatch:
     inputs:
       perf_repo:
-        description: "Optional owner/repo for the perf harness fork"
+        description: "Owner/repo for the perf harness"
         required: false
-        default: ""
+        default: "VasaviSD/nsb-ns3-perf-testing"
         type: string
       ns3_ref:
         description: "ns-3 branch, tag, or commit to clone"
@@ -57,15 +60,15 @@ jobs:
     if: github.repository_owner != 'nsb-ucsc'
     runs-on: ubuntu-latest
     env:
-      PERF_REPO: ${{ inputs.perf_repo != '' && inputs.perf_repo || format('{0}/nsb-ns3-perf-testing', github.repository_owner) }}
-      NS3_REF: ${{ inputs.ns3_ref }}
-      NODES: ${{ inputs.nodes }}
-      RATES: ${{ inputs.rates }}
-      DURATION: ${{ inputs.duration }}
-      MAX_AVG_RTT_S: ${{ inputs.max_avg_rtt_s }}
-      MAX_AVG_CPU_PERCENT: ${{ inputs.max_avg_cpu_percent }}
-      MAX_PEAK_MEMORY_MB: ${{ inputs.max_peak_memory_mb }}
-      MAX_DROP_RATE_PERCENT: ${{ inputs.max_drop_rate_percent }}
+      PERF_REPO: ${{ github.event_name == 'workflow_dispatch' && inputs.perf_repo || 'VasaviSD/nsb-ns3-perf-testing' }}
+      NS3_REF: ${{ github.event_name == 'workflow_dispatch' && inputs.ns3_ref || 'master' }}
+      NODES: ${{ github.event_name == 'workflow_dispatch' && inputs.nodes || '5' }}
+      RATES: ${{ github.event_name == 'workflow_dispatch' && inputs.rates || '10' }}
+      DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '5' }}
+      MAX_AVG_RTT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_rtt_s || '' }}
+      MAX_AVG_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_cpu_percent || '' }}
+      MAX_PEAK_MEMORY_MB: ${{ github.event_name == 'workflow_dispatch' && inputs.max_peak_memory_mb || '' }}
+      MAX_DROP_RATE_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_drop_rate_percent || '' }}
 
     steps:
       - name: Check out NSB
