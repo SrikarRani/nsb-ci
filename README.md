@@ -32,6 +32,10 @@ NSB was first created to address real research needs at the [Inter-Networking Re
 
 **Working specifically on autonomous vehicles system modeling?** This project was co-created in part to model the network behind vehicle-to-vehicle (V2V) networking for autonomous vehicles (AVs). We are currently searching for users/collaborators to let us know what they'd like to see in terms of more support for AV applications and V2V and V2X network simulations.
 
+## Forked CI/CD
+
+If you are maintaining a personal fork of NSB, see [docs/fork-ci-cd.md](docs/fork-ci-cd.md) for a fork-safe GitHub Actions setup that builds NSB, produces package artifacts, and runs the NSB + ns-3 performance sweep without enabling any automation in the upstream `nsb-ucsc/nsb` repository.
+
 ## Installation
 
 ### Prerequisites

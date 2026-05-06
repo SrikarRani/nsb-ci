@@ -1,0 +1,182 @@
+name: Fork Performance
+
+on:
+  workflow_dispatch:
+    inputs:
+      perf_repo:
+        description: "Optional owner/repo for the perf harness fork"
+        required: false
+        default: ""
+        type: string
+      ns3_ref:
+        description: "ns-3 branch, tag, or commit to clone"
+        required: false
+        default: "master"
+        type: string
+      nodes:
+        description: "Comma-separated node counts"
+        required: false
+        default: "5,15,25"
+        type: string
+      rates:
+        description: "Comma-separated message rates"
+        required: false
+        default: "10,30,50"
+        type: string
+      duration:
+        description: "Seconds per sweep run"
+        required: false
+        default: "10"
+        type: string
+      max_avg_rtt_s:
+        description: "Optional failure threshold for avg_rtt_s"
+        required: false
+        default: ""
+        type: string
+      max_avg_cpu_percent:
+        description: "Optional failure threshold for avg_cpu_percent"
+        required: false
+        default: ""
+        type: string
+      max_peak_memory_mb:
+        description: "Optional failure threshold for peak_memory_mb"
+        required: false
+        default: ""
+        type: string
+      max_drop_rate_percent:
+        description: "Optional failure threshold for drop_rate_percent"
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    if: github.repository_owner != 'nsb-ucsc'
+    runs-on: ubuntu-latest
+    env:
+      PERF_REPO: ${{ inputs.perf_repo != '' && inputs.perf_repo || format('{0}/nsb-ns3-perf-testing', github.repository_owner) }}
+      NS3_REF: ${{ inputs.ns3_ref }}
+      NODES: ${{ inputs.nodes }}
+      RATES: ${{ inputs.rates }}
+      DURATION: ${{ inputs.duration }}
+      MAX_AVG_RTT_S: ${{ inputs.max_avg_rtt_s }}
+      MAX_AVG_CPU_PERCENT: ${{ inputs.max_avg_cpu_percent }}
+      MAX_PEAK_MEMORY_MB: ${{ inputs.max_peak_memory_mb }}
+      MAX_DROP_RATE_PERCENT: ${{ inputs.max_drop_rate_percent }}
+
+    steps:
+      - name: Check out NSB
+        uses: actions/checkout@v4
+        with:
+          path: nsb
+
+      - name: Check out perf harness
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.PERF_REPO }}
+          path: nsb-ns3-perf-testing
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            git \
+            libabsl-dev \
+            protobuf-compiler \
+            libprotobuf-dev \
+            libyaml-cpp-dev \
+            libhiredis-dev \
+            python3-venv \
+            python3-pip
+
+      - name: Build and install NSB under /usr/local
+        working-directory: nsb
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+          sudo cmake --install build --config Release
+          echo "PKG_CONFIG_PATH=/usr/local/lib/pkgconfig:${PKG_CONFIG_PATH}" >> "$GITHUB_ENV"
+
+      - name: Clone ns-3
+        run: git clone --depth 1 --branch "$NS3_REF" https://gitlab.com/nsnam/ns-3-dev.git ns-3-dev
+
+      - name: Install ns-3 scratch overlay
+        shell: bash
+        run: |
+          mkdir -p ns-3-dev/scratch/nsb-perf
+          cat > ns-3-dev/scratch/nsb-perf/CMakeLists.txt <<'EOF'
+          find_package(PkgConfig REQUIRED)
+          pkg_check_modules(NSB REQUIRED IMPORTED_TARGET nsb)
+
+          set(NSB_SIM_SOURCE "${PROJECT_SOURCE_DIR}/../nsb/examples/ns3/nsb-testing-tcp.cc")
+
+          if(NOT EXISTS "${NSB_SIM_SOURCE}")
+            message(FATAL_ERROR "NSB simulation source not found: ${NSB_SIM_SOURCE}")
+          endif()
+
+          include_directories(/usr/local/nsb/include /usr/local/nsb/include/proto)
+          link_directories(/usr/local/nsb/lib)
+
+          build_exec(
+            EXECNAME nsb-testing-tcp
+            SOURCE_FILES "${NSB_SIM_SOURCE}"
+            LIBRARIES_TO_LINK PkgConfig::NSB
+                              "${ns3-libs}"
+                              "${ns3-contrib-libs}"
+            EXECUTABLE_DIRECTORY_PATH ${CMAKE_OUTPUT_DIRECTORY}/scratch/nsb-perf
+          )
+          EOF
+
+      - name: Configure and build ns-3
+        working-directory: ns-3-dev
+        run: |
+          ./ns3 configure --build-profile=release --enable-examples --disable-tests
+          ./ns3 build
+
+      - name: Run performance sweep
+        working-directory: nsb-ns3-perf-testing
+        env:
+          NSB_NS3_BASE_DIR: ${{ github.workspace }}
+        run: |
+          ./scripts/run_perf_sweep.sh \
+            --nodes "$NODES" \
+            --rates "$RATES" \
+            --duration "$DURATION" \
+            --capture-arg "--daemon-cmd" \
+            --capture-arg "./build/nsb_daemon config-ns3-perf.yaml" \
+            --capture-arg "--ns3-cmd" \
+            --capture-arg "./ns3 run nsb-testing-tcp"
+
+      - name: Generate performance plots
+        working-directory: nsb-ns3-perf-testing
+        run: |
+          ./.venv/bin/python -m pip install matplotlib
+          ./.venv/bin/python ./scripts/plot_perf_metrics.py \
+            --csv ./results/perf_summary.csv \
+            --out-dir ./results/plots
+
+      - name: Enforce optional thresholds
+        run: >
+          python nsb/.github/scripts/check_perf_thresholds.py
+          nsb-ns3-perf-testing/results/perf_summary.csv
+
+      - name: Upload performance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsb-performance-${{ github.run_id }}
+          path: nsb-ns3-perf-testing/results
+          if-no-files-found: warn
+          retention-days: 14

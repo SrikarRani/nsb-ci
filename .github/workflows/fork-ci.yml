@@ -1,0 +1,80 @@
+name: Fork CI
+
+on:
+  push:
+    paths-ignore:
+      - "docs/**"
+  pull_request:
+    paths-ignore:
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    if: github.repository_owner != 'nsb-ucsc'
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - macos-14
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libabsl-dev \
+            protobuf-compiler \
+            libprotobuf-dev \
+            libyaml-cpp-dev \
+            libhiredis-dev
+
+      - name: Install macOS build dependencies
+        if: runner.os == 'macOS'
+        run: |
+          brew update
+          brew install cmake ninja pkg-config abseil protobuf yaml-cpp hiredis
+
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX="${{ github.workspace }}/stage"
+
+      - name: Build
+        run: cmake --build build --config Release
+
+      - name: Install staged artifacts
+        run: cmake --install build --config Release
+
+      - name: Verify Python client package install
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install ./python
+          python - <<'PY'
+          import nsb_client
+          import proto.nsb_pb2
+          print(f"Imported {nsb_client.__name__} and proto.nsb_pb2 successfully")
+          PY

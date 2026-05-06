@@ -1,0 +1,77 @@
+name: Fork Packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: fork-packages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    if: github.repository_owner != 'nsb-ucsc'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            cmake \
+            ninja-build \
+            pkg-config \
+            libabsl-dev \
+            protobuf-compiler \
+            libprotobuf-dev \
+            libyaml-cpp-dev \
+            libhiredis-dev
+
+      - name: Configure CMake
+        run: >
+          cmake -S . -B build -G Ninja
+          -DCMAKE_BUILD_TYPE=Release
+          -DCMAKE_INSTALL_PREFIX="${{ runner.temp }}/stage"
+
+      - name: Build native artifacts
+        run: cmake --build build --config Release
+
+      - name: Install native artifacts
+        run: cmake --install build --config Release
+
+      - name: Build distribution artifacts
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip build
+          mkdir -p "${RUNNER_TEMP}/package"
+          python -m build ./python --outdir "${RUNNER_TEMP}/package"
+          version="${GITHUB_REF_NAME:-${GITHUB_SHA::7}}"
+          tar -C "${RUNNER_TEMP}/stage" -czf "${RUNNER_TEMP}/package/nsb-${version}-linux-x86_64.tar.gz" .
+          (cd "${RUNNER_TEMP}/package" && sha256sum * > SHA256SUMS.txt)
+
+      - name: Upload package artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsb-packages-${{ github.run_id }}
+          path: ${{ runner.temp }}/package
+          if-no-files-found: error
+
+      - name: Publish GitHub release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ runner.temp }}/package/*

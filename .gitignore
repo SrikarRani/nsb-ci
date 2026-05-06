@@ -3,6 +3,7 @@
 *.dSYM
 *.DS_Store
 build/*
+build-wsl/*
 cpp/rabbit/build/*
 */docs/
 __pycache__
@@ -15,5 +16,8 @@ abseil-cpp
 yaml-cpp
 install
 test
+dist/
+python/build/
+python/dist/
 python/nsb_client.egg-info/*
 .vscode

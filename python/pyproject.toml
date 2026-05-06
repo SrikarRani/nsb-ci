@@ -1,8 +1,23 @@
-# pyproject.toml
 [build-system]
-requires = ["setuptools", "protobuf", "redis[hiredis]"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "nsb_client"
+name = "nsb-client"
 version = "0.1.0"
+description = "Python client library for the NSB Network Simulation Bridge"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "protobuf",
+    "redis[hiredis]",
+]
+
+[tool.setuptools]
+py-modules = ["nsb_client"]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["proto*"]
+namespaces = true
