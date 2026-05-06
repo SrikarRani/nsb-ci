@@ -130,22 +130,34 @@ jobs:
         run: |
           mkdir -p ns-3-dev/scratch/nsb-perf
           cat > ns-3-dev/scratch/nsb-perf/CMakeLists.txt <<'EOF'
-          find_package(PkgConfig REQUIRED)
-          pkg_check_modules(NSB REQUIRED IMPORTED_TARGET nsb)
-
           set(NSB_SIM_SOURCE "${PROJECT_SOURCE_DIR}/../nsb/examples/ns3/nsb-testing-tcp.cc")
 
           if(NOT EXISTS "${NSB_SIM_SOURCE}")
             message(FATAL_ERROR "NSB simulation source not found: ${NSB_SIM_SOURCE}")
           endif()
 
-          include_directories(/usr/local/nsb/include /usr/local/nsb/include/proto)
-          link_directories(/usr/local/nsb/lib)
+          find_library(NSB_LIBRARY nsb PATHS /usr/local/nsb/lib REQUIRED NO_DEFAULT_PATH)
+
+          set(NSB_INCLUDE_DIR "/usr/local/nsb/include")
+          set(NSB_PROTO_INCLUDE_DIR "/usr/local/nsb/include/proto")
+          set(NSB_PROTO_FALLBACK_DIR "/usr/local/nsb/include/proto/proto")
+
+          if(NOT EXISTS "${NSB_INCLUDE_DIR}")
+            message(FATAL_ERROR "NSB include directory not found: ${NSB_INCLUDE_DIR}")
+          endif()
+
+          if(EXISTS "${NSB_PROTO_INCLUDE_DIR}")
+            include_directories("${NSB_INCLUDE_DIR}" "${NSB_PROTO_INCLUDE_DIR}")
+          elseif(EXISTS "${NSB_PROTO_FALLBACK_DIR}")
+            include_directories("${NSB_INCLUDE_DIR}" "${NSB_PROTO_FALLBACK_DIR}")
+          else()
+            message(FATAL_ERROR "NSB generated protobuf headers not found under /usr/local/nsb/include")
+          endif()
 
           build_exec(
             EXECNAME nsb-testing-tcp
             SOURCE_FILES "${NSB_SIM_SOURCE}"
-            LIBRARIES_TO_LINK PkgConfig::NSB
+            LIBRARIES_TO_LINK "${NSB_LIBRARY}"
                               "${ns3-libs}"
                               "${ns3-contrib-libs}"
             EXECUTABLE_DIRECTORY_PATH ${CMAKE_OUTPUT_DIRECTORY}/scratch/nsb-perf
