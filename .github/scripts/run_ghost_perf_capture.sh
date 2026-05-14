@@ -8,7 +8,7 @@ DAEMON_DIR="${DAEMON_DIR:-${REPO_ROOT}}"
 SIM_WORKDIR="${SIM_WORKDIR:-${REPO_ROOT}}"
 VENV_DIR="${VENV_DIR:-${REPO_ROOT}/.venv}"
 DAEMON_CMD="${DAEMON_CMD:-./build/nsb_daemon config-ghost-perf.yaml}"
-SIM_CMD="${SIM_CMD:-python .github/scripts/ghost_simulator.py --identifier ghost}"
+SIM_CMD="${SIM_CMD:-}"
 PYTHON_CMD_BASE="${PYTHON_CMD_BASE:-}"
 SAMPLE_INTERVAL="${SAMPLE_INTERVAL:-1}"
 STARTUP_SLEEP="${STARTUP_SLEEP:-3}"
@@ -80,6 +80,10 @@ setup_python_venv() {
 }
 
 setup_python_venv
+
+if [[ -z "${SIM_CMD:-}" ]]; then
+  SIM_CMD="${VENV_DIR}/bin/python ${REPO_ROOT}/.github/scripts/ghost_simulator.py --identifier ghost"
+fi
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
 if [[ -n "$RUN_TAG" ]]; then

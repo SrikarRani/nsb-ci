@@ -115,9 +115,7 @@ jobs:
             --output-root ./results \
             --summary-csv ./results/perf_summary.csv \
             --capture-arg=--daemon-cmd \
-            --capture-arg=./build/nsb_daemon\ config-ghost-perf.yaml \
-            --capture-arg=--sim-cmd \
-            --capture-arg=python\ .github/scripts/ghost_simulator.py\ --identifier\ ghost
+            --capture-arg=./build/nsb_daemon\ config-ghost-perf.yaml
 
       - name: Run manual ghost performance sweep
         if: github.event_name == 'workflow_dispatch'
@@ -132,9 +130,7 @@ jobs:
             --output-root ./results \
             --summary-csv ./results/perf_summary.csv \
             --capture-arg=--daemon-cmd \
-            --capture-arg=./build/nsb_daemon\ config-ghost-perf.yaml \
-            --capture-arg=--sim-cmd \
-            --capture-arg=python\ .github/scripts/ghost_simulator.py\ --identifier\ ghost
+            --capture-arg=./build/nsb_daemon\ config-ghost-perf.yaml
 
       - name: Generate performance plots
         working-directory: nsb
