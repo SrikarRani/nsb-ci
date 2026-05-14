@@ -9,12 +9,12 @@ on:
       nodes:
         description: "Comma-separated node counts"
         required: false
-        default: "5,15,25"
+        default: "5,15,25,50,100,200"
         type: string
       rates:
         description: "Comma-separated message rates"
         required: false
-        default: "10,30,50"
+        default: "10,30,50,100,300,500,1000"
         type: string
       duration:
         description: "Seconds per sweep run"
@@ -50,7 +50,8 @@ jobs:
     if: github.repository_owner != 'nsb-ucsc'
     runs-on: ubuntu-latest
     env:
-      PUSH_PERF_CASES: "5:10,10:25,25:50,40:75"
+      PUSH_NODES: "5,15,25,50,100,200"
+      PUSH_RATES: "10,30,50,100,300,500,1000"
       NODES: ${{ github.event_name == 'workflow_dispatch' && inputs.nodes || '5' }}
       RATES: ${{ github.event_name == 'workflow_dispatch' && inputs.rates || '10' }}
       DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '5' }}
@@ -103,14 +104,15 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
           sudo cmake --install build --config Release
-      - name: Run curated push ghost perf suite
+      - name: Run full push ghost perf matrix
         if: github.event_name == 'push'
         working-directory: nsb
         run: |
+          cases=$(python -c "nodes='${PUSH_NODES}'.split(','); rates='${PUSH_RATES}'.split(','); print(','.join(f'{n.strip()}:{r.strip()}' for n in nodes for r in rates if n.strip() and r.strip()))")
           python .github/scripts/run_perf_cases.py \
             --repo-root . \
             --capture-script .github/scripts/run_ghost_perf_capture.sh \
-            --cases "$PUSH_PERF_CASES" \
+            --cases "$cases" \
             --duration "$DURATION" \
             --output-root ./results \
             --summary-csv ./results/perf_summary.csv \
