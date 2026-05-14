@@ -186,56 +186,6 @@ def sender_worker(
     print(f"\n[SENDER] Done: {sent} messages in {elapsed:.2f}s ({sent / elapsed:.1f} msg/s actual)")
 
 
-def receiver_worker(
-    host_id: str,
-    client: NSBAppClient,
-    sent_tracker: Dict[str, dict],
-    received_ids: Set[str],
-    metrics: Metrics,
-    state_lock: threading.Lock,
-    stop_event: threading.Event,
-    last_activity_ref: list[float],
-    receive_timeout: float,
-) -> None:
-    while not stop_event.is_set():
-        received = client.receive(timeout=receive_timeout)
-        if not received:
-            continue
-
-        envelope = decode_envelope(received.payload)
-        with state_lock:
-            if envelope is None:
-                metrics.parse_failures += 1
-                continue
-
-            msg_id = envelope.get("msg_id")
-            if not msg_id or envelope.get("type") != "data":
-                metrics.unexpected_msgs += 1
-                continue
-
-            if msg_id not in sent_tracker or msg_id in received_ids:
-                continue
-
-            if envelope.get("dest") != host_id:
-                metrics.unexpected_msgs += 1
-                continue
-
-            payload_text = envelope.get("payload", "")
-            expected_hash = envelope.get("payload_hash", "")
-            if payload_hash(payload_text) != expected_hash:
-                metrics.hash_failures += 1
-                continue
-            if expected_hash != sent_tracker[msg_id]["payload_hash"]:
-                metrics.hash_failures += 1
-                continue
-
-            rtt = time.perf_counter() - sent_tracker[msg_id]["send_ts"]
-            received_ids.add(msg_id)
-            metrics.received += 1
-            metrics.rtt_s.append(rtt)
-            last_activity_ref[0] = time.perf_counter()
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="NSB ghost simulator performance test client")
     parser.add_argument("--nodes", type=int, default=10, help="Number of NSB host clients")
@@ -252,8 +202,8 @@ def main() -> None:
     parser.add_argument(
         "--receive-timeout",
         type=float,
-        default=0.05,
-        help="Seconds each app receiver waits per pull request before retrying",
+        default=0.001,
+        help="Seconds each centralized pull poll waits before moving to the next host",
     )
     args = parser.parse_args()
 
@@ -271,7 +221,6 @@ def main() -> None:
     sent_tracker: Dict[str, dict] = {}
     received_ids: Set[str] = set()
     state_lock = threading.Lock()
-    stop_event = threading.Event()
     sender_done = threading.Event()
     sender_error: list[str] = []
     last_activity_ref = [time.perf_counter()]
@@ -288,28 +237,9 @@ def main() -> None:
     )
     sender_thread.start()
 
-    receiver_threads = []
-    for host_id, client in apps:
-        thread = threading.Thread(
-            target=receiver_worker,
-            args=(
-                host_id,
-                client,
-                sent_tracker,
-                received_ids,
-                metrics,
-                state_lock,
-                stop_event,
-                last_activity_ref,
-                args.receive_timeout,
-            ),
-            daemon=True,
-        )
-        thread.start()
-        receiver_threads.append(thread)
-
     loop_start = time.perf_counter()
     last_progress = 0.0
+    next_recv_index = 0
 
     try:
         while True:
@@ -321,6 +251,46 @@ def main() -> None:
                 parse_failures = metrics.parse_failures
                 unexpected_msgs = metrics.unexpected_msgs
                 last_activity = last_activity_ref[0]
+
+            for _ in range(len(apps)):
+                host_id, client = apps[next_recv_index]
+                next_recv_index = (next_recv_index + 1) % len(apps)
+                received = client.receive(timeout=args.receive_timeout)
+                if not received:
+                    continue
+
+                envelope = decode_envelope(received.payload)
+                with state_lock:
+                    if envelope is None:
+                        metrics.parse_failures += 1
+                        continue
+
+                    msg_id = envelope.get("msg_id")
+                    if not msg_id or envelope.get("type") != "data":
+                        metrics.unexpected_msgs += 1
+                        continue
+
+                    if msg_id not in sent_tracker or msg_id in received_ids:
+                        continue
+
+                    if envelope.get("dest") != host_id:
+                        metrics.unexpected_msgs += 1
+                        continue
+
+                    payload_text = envelope.get("payload", "")
+                    expected_hash = envelope.get("payload_hash", "")
+                    if payload_hash(payload_text) != expected_hash:
+                        metrics.hash_failures += 1
+                        continue
+                    if expected_hash != sent_tracker[msg_id]["payload_hash"]:
+                        metrics.hash_failures += 1
+                        continue
+
+                    rtt = time.perf_counter() - sent_tracker[msg_id]["send_ts"]
+                    received_ids.add(msg_id)
+                    metrics.received += 1
+                    metrics.rtt_s.append(rtt)
+                    last_activity_ref[0] = time.perf_counter()
 
             now = time.perf_counter()
             if now - last_progress >= 0.2:
@@ -348,10 +318,7 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\n[INTERRUPTED]")
 
-    stop_event.set()
     sender_thread.join(timeout=5)
-    for thread in receiver_threads:
-        thread.join(timeout=2)
 
     elapsed = time.perf_counter() - loop_start
     print(f"\r{progress_line(metrics.sent, metrics.received, elapsed)}")
