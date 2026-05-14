@@ -30,6 +30,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--server-host", default="127.0.0.1", help="NSB daemon host")
     parser.add_argument("--server-port", type=int, default=65432, help="NSB daemon port")
     parser.add_argument(
+        "--sources",
+        default="",
+        help="Comma-separated application source IDs to poll, e.g. host0,host1",
+    )
+    parser.add_argument(
+        "--fetch-timeout",
+        type=float,
+        default=0.05,
+        help="Seconds to wait for each fetch response before trying the next source",
+    )
+    parser.add_argument(
+        "--idle-sleep",
+        type=float,
+        default=0.01,
+        help="Seconds to sleep when no messages are available",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -62,24 +79,44 @@ def run(args: argparse.Namespace) -> int:
         args.server_host,
         args.server_port,
     )
+    sources = [source.strip() for source in args.sources.split(",") if source.strip()]
+    if sources:
+        logger.info("Polling sources: %s", ", ".join(sources))
+    else:
+        logger.warning("No sources configured; polling without explicit source IDs")
 
     relayed = 0
     while not STOP_REQUESTED:
+        relayed_this_pass = 0
         try:
-            msg = sim.fetch(timeout=1)
+            if sources:
+                for source in sources:
+                    while not STOP_REQUESTED:
+                        msg = sim.fetch(src_id=source, timeout=args.fetch_timeout)
+                        if not msg:
+                            break
+                        payload = getattr(msg, "payload", b"") or b""
+                        sim.post(msg.src_id, msg.dest_id, payload)
+                        relayed += 1
+                        relayed_this_pass += 1
+                        if relayed % 50 == 0:
+                            logger.info("Relayed %s payloads", relayed)
+            else:
+                msg = sim.fetch(timeout=args.fetch_timeout)
+                if msg:
+                    payload = getattr(msg, "payload", b"") or b""
+                    sim.post(msg.src_id, msg.dest_id, payload)
+                    relayed += 1
+                    relayed_this_pass += 1
+                    if relayed % 50 == 0:
+                        logger.info("Relayed %s payloads", relayed)
         except Exception as exc:  # pragma: no cover - defensive for CI runtime
             logger.exception("Simulator fetch failed: %s", exc)
             return 1
 
-        if not msg:
-            time.sleep(0.05)
+        if relayed_this_pass == 0:
+            time.sleep(args.idle_sleep)
             continue
-
-        payload = getattr(msg, "payload", b"") or b""
-        sim.post(msg.src_id, msg.dest_id, payload)
-        relayed += 1
-        if relayed % 50 == 0:
-            logger.info("Relayed %s payloads", relayed)
 
     logger.info("Stopping ghost simulator after relaying %s payloads", relayed)
     return 0

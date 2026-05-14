@@ -16,6 +16,7 @@ OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/results}"
 
 RUN_TAG=""
 PY_ARGS=()
+NODES_ARG_VALUE=""
 
 usage() {
   cat <<'EOF'
@@ -55,6 +56,19 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+for ((i=0; i<${#PY_ARGS[@]}; i++)); do
+  arg="${PY_ARGS[$i]}"
+  if [[ "$arg" == "--nodes" ]]; then
+    if (( i + 1 < ${#PY_ARGS[@]} )); then
+      NODES_ARG_VALUE="${PY_ARGS[$((i+1))]}"
+    fi
+    break
+  elif [[ "$arg" == --nodes=* ]]; then
+    NODES_ARG_VALUE="${arg#--nodes=}"
+    break
+  fi
+done
+
 if [[ -z "${PYTHON_CMD_BASE:-}" ]]; then
   PYTHON_CMD_BASE="${VENV_DIR}/bin/python ${REPO_ROOT}/.github/scripts/ghost_perf_test_client.py"
 fi
@@ -83,6 +97,19 @@ setup_python_venv
 
 if [[ -z "${SIM_CMD:-}" ]]; then
   SIM_CMD="${VENV_DIR}/bin/python ${REPO_ROOT}/.github/scripts/ghost_simulator.py --identifier ghost"
+fi
+
+if [[ -n "${NODES_ARG_VALUE:-}" ]]; then
+  SIM_SOURCES=""
+  for ((i=0; i<${NODES_ARG_VALUE}; i++)); do
+    source="host${i}"
+    if [[ -z "$SIM_SOURCES" ]]; then
+      SIM_SOURCES="$source"
+    else
+      SIM_SOURCES="${SIM_SOURCES},${source}"
+    fi
+  done
+  SIM_CMD="${SIM_CMD} --sources ${SIM_SOURCES}"
 fi
 
 TIMESTAMP="$(date +%Y%m%d-%H%M%S)"
@@ -158,6 +185,7 @@ capture_git_state() {
   echo "sim_cmd: $SIM_CMD"
   echo "python_cmd_base: $PYTHON_CMD_BASE"
   echo "python_args: ${PY_ARGS[*]:-<none>}"
+  echo "nodes_arg_value: ${NODES_ARG_VALUE:-<unset>}"
   echo "sample_interval_s: $SAMPLE_INTERVAL"
   echo "startup_sleep_s: $STARTUP_SLEEP"
   echo "host: $(hostname)"

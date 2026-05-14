@@ -297,7 +297,7 @@ def main() -> None:
                 break
 
             idle_s = now - last_activity
-            if metrics.received > 0 and idle_s >= args.idle_timeout:
+            if sender_done and idle_s >= args.idle_timeout:
                 print(
                     f"\n[TIMEOUT] No messages for {idle_s:.1f}s "
                     f"(received {metrics.received}/{metrics.sent}). Stopping."
