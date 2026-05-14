@@ -123,15 +123,11 @@ jobs:
         if: github.event_name == 'workflow_dispatch'
         working-directory: nsb
         run: |
+          cases=$(python -c "nodes='${NODES}'.split(','); rates='${RATES}'.split(','); print(','.join(f'{n.strip()}:{r.strip()}' for n in nodes for r in rates if n.strip() and r.strip()))")
           python .github/scripts/run_perf_cases.py \
             --repo-root . \
             --capture-script .github/scripts/run_ghost_perf_capture.sh \
-            --cases "$(python - <<'PY'
-nodes = "${{ env.NODES }}".split(",")
-rates = "${{ env.RATES }}".split(",")
-print(",".join(f"{n.strip()}:{r.strip()}" for n in nodes for r in rates if n.strip() and r.strip()))
-PY
-)" \
+            --cases "$cases" \
             --duration "$DURATION" \
             --output-root ./results \
             --summary-csv ./results/perf_summary.csv \
