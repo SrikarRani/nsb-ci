@@ -13,6 +13,7 @@ from pathlib import Path
 SUMMARY_FIELDS = [
     "nodes",
     "rate",
+    "duration_s",
     "sent",
     "received",
     "dropped",
@@ -150,6 +151,7 @@ def run_case(
     row = {field: "NA" for field in SUMMARY_FIELDS}
     row["nodes"] = nodes
     row["rate"] = rate
+    row["duration_s"] = duration
     row["exit_code"] = str(completed.returncode)
     row["run_dir"] = str(run_dir) if run_dir else "NA"
 

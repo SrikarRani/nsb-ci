@@ -54,7 +54,10 @@ def main() -> int:
             ]
         )
         for row in rows:
-            case = f"n{row.get('nodes', 'NA')} @ r{row.get('rate', 'NA')}"
+            case = (
+                f"n{row.get('nodes', 'NA')} @ r{row.get('rate', 'NA')}"
+                f" for {row.get('duration_s', 'NA')}s"
+            )
             status = "PASS" if row.get("exit_code") == "0" else "FAIL"
             lines.append(
                 "| "
