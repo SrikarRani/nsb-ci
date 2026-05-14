@@ -35,14 +35,18 @@ def load_thresholds() -> dict[str, float]:
     return thresholds
 
 
-def load_rows(csv_path: Path) -> list[dict[str, float]]:
-    rows: list[dict[str, float]] = []
+def load_rows(csv_path: Path) -> list[dict[str, float | str | None]]:
+    rows: list[dict[str, float | str | None]] = []
     with csv_path.open(newline="", encoding="utf-8") as handle:
         reader = csv.DictReader(handle)
         for row in reader:
             parsed = {
+                "exit_code": (row.get("exit_code") or "").strip(),
                 "nodes": parse_float(row.get("nodes")),
                 "rate": parse_float(row.get("rate")),
+                "sent": parse_float(row.get("sent")),
+                "received": parse_float(row.get("received")),
+                "dropped": parse_float(row.get("dropped")),
                 "avg_rtt_s": parse_float(row.get("avg_rtt_s")),
                 "avg_cpu_percent": parse_float(row.get("avg_cpu_percent")),
                 "peak_memory_mb": parse_float(row.get("peak_memory_mb")),
@@ -72,6 +76,32 @@ def main() -> int:
     rows = load_rows(csv_path)
     if not rows:
         print("No usable performance rows found in summary CSV.", file=sys.stderr)
+        return 1
+
+    incomplete_rows = []
+    failed_rows = []
+    for row in rows:
+        if row.get("exit_code") != "0":
+            failed_rows.append(row)
+        if any(row.get(field) is None for field in ("sent", "received", "dropped", "drop_rate_percent")):
+            incomplete_rows.append(row)
+
+    if failed_rows:
+        print("One or more performance cases exited nonzero.", file=sys.stderr)
+        for row in failed_rows:
+            print(
+                f"  - nodes={row['nodes']} rate={row['rate']} exit_code={row['exit_code']}",
+                file=sys.stderr,
+            )
+        return 1
+
+    if incomplete_rows:
+        print("One or more performance rows are incomplete.", file=sys.stderr)
+        for row in incomplete_rows:
+            print(
+                f"  - nodes={row['nodes']} rate={row['rate']} sent={row['sent']} received={row['received']}",
+                file=sys.stderr,
+            )
         return 1
 
     observed = {}

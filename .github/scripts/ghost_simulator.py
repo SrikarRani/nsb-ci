@@ -37,7 +37,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fetch-timeout",
         type=float,
-        default=0.05,
+        default=0.01,
         help="Seconds to wait for each fetch response before trying the next source",
     )
     parser.add_argument(
@@ -86,21 +86,24 @@ def run(args: argparse.Namespace) -> int:
         logger.warning("No sources configured; polling without explicit source IDs")
 
     relayed = 0
+    source_index = 0
     while not STOP_REQUESTED:
         relayed_this_pass = 0
         try:
             if sources:
-                for source in sources:
-                    while not STOP_REQUESTED:
-                        msg = sim.fetch(src_id=source, timeout=args.fetch_timeout)
-                        if not msg:
-                            break
-                        payload = getattr(msg, "payload", b"") or b""
-                        sim.post(msg.src_id, msg.dest_id, payload)
-                        relayed += 1
-                        relayed_this_pass += 1
-                        if relayed % 50 == 0:
-                            logger.info("Relayed %s payloads", relayed)
+                ordered_sources = sources[source_index:] + sources[:source_index]
+                if sources:
+                    source_index = (source_index + 1) % len(sources)
+                for source in ordered_sources:
+                    msg = sim.fetch(src_id=source, timeout=args.fetch_timeout)
+                    if not msg:
+                        continue
+                    payload = getattr(msg, "payload", b"") or b""
+                    sim.post(msg.src_id, msg.dest_id, payload)
+                    relayed += 1
+                    relayed_this_pass += 1
+                    if relayed % 50 == 0:
+                        logger.info("Relayed %s payloads", relayed)
             else:
                 msg = sim.fetch(timeout=args.fetch_timeout)
                 if msg:

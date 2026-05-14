@@ -13,8 +13,6 @@ import argparse
 import hashlib
 import json
 import logging
-import os
-import queue
 import random
 import string
 import sys
@@ -123,9 +121,13 @@ class Metrics:
 
 def sender_worker(
     apps: list,
-    send_queue: queue.Queue,
+    metrics: Metrics,
+    sent_tracker: Dict[str, dict],
+    state_lock: threading.Lock,
     rate: int,
     duration_s: float,
+    sender_done: threading.Event,
+    sender_error: list[str],
 ) -> None:
     num_apps = len(apps)
     interval_s = 1.0 / rate
@@ -159,13 +161,18 @@ def sender_worker(
             p_hash = payload_hash(payload_text)
 
             send_ts = time.perf_counter()
-            sender_client.send(receiver_host, encoded)
-            time.sleep(0.0001)
-
-            send_queue.put(("msg", msg_id, send_ts, p_hash))
-            sent += 1
-            sequence += 1
-            next_send += interval_s
+            try:
+                with state_lock:
+                    sent_tracker[msg_id] = {"send_ts": send_ts, "payload_hash": p_hash}
+                    metrics.sent += 1
+                sender_client.send(receiver_host, encoded)
+                time.sleep(0.0001)
+                sent += 1
+                sequence += 1
+                next_send += interval_s
+            except Exception as exc:  # pragma: no cover - runtime defensive path
+                sender_error.append(str(exc))
+                return
 
             if now < next_send:
                 break
@@ -174,9 +181,59 @@ def sender_worker(
         if remaining > 0:
             time.sleep(remaining)
 
-    send_queue.put(("done", sent))
+    sender_done.set()
     elapsed = time.perf_counter() - start
     print(f"\n[SENDER] Done: {sent} messages in {elapsed:.2f}s ({sent / elapsed:.1f} msg/s actual)")
+
+
+def receiver_worker(
+    host_id: str,
+    client: NSBAppClient,
+    sent_tracker: Dict[str, dict],
+    received_ids: Set[str],
+    metrics: Metrics,
+    state_lock: threading.Lock,
+    stop_event: threading.Event,
+    last_activity_ref: list[float],
+    receive_timeout: float,
+) -> None:
+    while not stop_event.is_set():
+        received = client.receive(timeout=receive_timeout)
+        if not received:
+            continue
+
+        envelope = decode_envelope(received.payload)
+        with state_lock:
+            if envelope is None:
+                metrics.parse_failures += 1
+                continue
+
+            msg_id = envelope.get("msg_id")
+            if not msg_id or envelope.get("type") != "data":
+                metrics.unexpected_msgs += 1
+                continue
+
+            if msg_id not in sent_tracker or msg_id in received_ids:
+                continue
+
+            if envelope.get("dest") != host_id:
+                metrics.unexpected_msgs += 1
+                continue
+
+            payload_text = envelope.get("payload", "")
+            expected_hash = envelope.get("payload_hash", "")
+            if payload_hash(payload_text) != expected_hash:
+                metrics.hash_failures += 1
+                continue
+            if expected_hash != sent_tracker[msg_id]["payload_hash"]:
+                metrics.hash_failures += 1
+                continue
+
+            rtt = time.perf_counter() - sent_tracker[msg_id]["send_ts"]
+            received_ids.add(msg_id)
+            metrics.received += 1
+            metrics.rtt_s.append(rtt)
+            last_activity_ref[0] = time.perf_counter()
 
 
 def main() -> None:
@@ -192,6 +249,12 @@ def main() -> None:
     )
     parser.add_argument("--server-host", default="127.0.0.1", help="NSB daemon address")
     parser.add_argument("--server-port", type=int, default=65432, help="NSB daemon port")
+    parser.add_argument(
+        "--receive-timeout",
+        type=float,
+        default=0.05,
+        help="Seconds each app receiver waits per pull request before retrying",
+    )
     args = parser.parse_args()
 
     logging.getLogger().setLevel(logging.WARNING)
@@ -204,10 +267,14 @@ def main() -> None:
         apps.append((host_id, client))
     print(f"App clients ready ({args.nodes} hosts).")
 
-    send_queue: queue.Queue = queue.Queue()
     metrics = Metrics(rate=args.rate, duration_s=args.duration)
     sent_tracker: Dict[str, dict] = {}
     received_ids: Set[str] = set()
+    state_lock = threading.Lock()
+    stop_event = threading.Event()
+    sender_done = threading.Event()
+    sender_error: list[str] = []
+    last_activity_ref = [time.perf_counter()]
 
     print(
         f"\n[RUN] rate={args.rate} msg/s | duration={args.duration}s | "
@@ -216,92 +283,64 @@ def main() -> None:
 
     sender_thread = threading.Thread(
         target=sender_worker,
-        args=(apps, send_queue, args.rate, args.duration),
+        args=(apps, metrics, sent_tracker, state_lock, args.rate, args.duration, sender_done, sender_error),
         daemon=True,
     )
     sender_thread.start()
 
-    sender_done = False
-    last_activity = time.perf_counter()
+    receiver_threads = []
+    for host_id, client in apps:
+        thread = threading.Thread(
+            target=receiver_worker,
+            args=(
+                host_id,
+                client,
+                sent_tracker,
+                received_ids,
+                metrics,
+                state_lock,
+                stop_event,
+                last_activity_ref,
+                args.receive_timeout,
+            ),
+            daemon=True,
+        )
+        thread.start()
+        receiver_threads.append(thread)
+
     loop_start = time.perf_counter()
     last_progress = 0.0
-    last_recv_poll = 0.0
-    recv_poll_interval = 0.2
 
     try:
         while True:
-            while True:
-                try:
-                    item = send_queue.get_nowait()
-                except queue.Empty:
-                    break
-                if item[0] == "msg":
-                    _, msg_id, send_ts, p_hash = item
-                    sent_tracker[msg_id] = {"send_ts": send_ts, "payload_hash": p_hash}
-                    metrics.sent += 1
-                elif item[0] == "done":
-                    sender_done = True
-
             now = time.perf_counter()
-            got_msg = False
-            if now - last_recv_poll >= recv_poll_interval:
-                last_recv_poll = now
-                for host_id, client in apps:
-                    while True:
-                        received = client.receive(timeout=2)
-                        if not received:
-                            break
-
-                        envelope = decode_envelope(received.payload)
-                        if envelope is None:
-                            metrics.parse_failures += 1
-                            continue
-
-                        msg_id = envelope.get("msg_id")
-                        if not msg_id or envelope.get("type") != "data":
-                            metrics.unexpected_msgs += 1
-                            continue
-
-                        if msg_id not in sent_tracker or msg_id in received_ids:
-                            continue
-
-                        if envelope.get("dest") != host_id:
-                            metrics.unexpected_msgs += 1
-                            continue
-
-                        payload_text = envelope.get("payload", "")
-                        expected_hash = envelope.get("payload_hash", "")
-                        if payload_hash(payload_text) != expected_hash:
-                            metrics.hash_failures += 1
-                            continue
-                        if expected_hash != sent_tracker[msg_id]["payload_hash"]:
-                            metrics.hash_failures += 1
-                            continue
-
-                        rtt = time.perf_counter() - sent_tracker[msg_id]["send_ts"]
-                        received_ids.add(msg_id)
-                        metrics.received += 1
-                        metrics.rtt_s.append(rtt)
-                        got_msg = True
-
-            if got_msg:
-                last_activity = time.perf_counter()
+            with state_lock:
+                sent_count = metrics.sent
+                received_count = metrics.received
+                hash_failures = metrics.hash_failures
+                parse_failures = metrics.parse_failures
+                unexpected_msgs = metrics.unexpected_msgs
+                last_activity = last_activity_ref[0]
 
             now = time.perf_counter()
             if now - last_progress >= 0.2:
                 elapsed = now - loop_start
-                print(f"\r{progress_line(metrics.sent, metrics.received, elapsed)}", end="", flush=True)
+                print(f"\r{progress_line(sent_count, received_count, elapsed)}", end="", flush=True)
                 last_progress = now
 
-            if sender_done and metrics.sent > 0 and metrics.received >= metrics.sent:
+            if sender_done.is_set() and sent_count > 0 and received_count >= sent_count:
                 break
 
             idle_s = now - last_activity
-            if sender_done and idle_s >= args.idle_timeout:
+            if sender_done.is_set() and idle_s >= args.idle_timeout:
                 print(
                     f"\n[TIMEOUT] No messages for {idle_s:.1f}s "
-                    f"(received {metrics.received}/{metrics.sent}). Stopping."
+                    f"(received {received_count}/{sent_count}). Stopping."
                 )
+                break
+
+            if sender_error:
+                print(f"\n[SENDER ERROR] {sender_error[0]}")
                 break
 
             time.sleep(0.001)
@@ -309,7 +348,10 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\n[INTERRUPTED]")
 
+    stop_event.set()
     sender_thread.join(timeout=5)
+    for thread in receiver_threads:
+        thread.join(timeout=2)
 
     elapsed = time.perf_counter() - loop_start
     print(f"\r{progress_line(metrics.sent, metrics.received, elapsed)}")
@@ -335,6 +377,23 @@ def main() -> None:
             f"            min={summary['rtt_min_s']:.4f}s  max={summary['rtt_max_s']:.4f}s"
         )
     print("=================")
+
+    strict_failure = any(
+        [
+            bool(sender_error),
+            summary["sent"] == 0,
+            summary["received"] != summary["sent"],
+            summary["hash_failures"] > 0,
+            summary["parse_failures"] > 0,
+            summary["unexpected_msgs"] > 0,
+        ]
+    )
+    if strict_failure:
+        print("[RESULT] FAIL")
+        raise SystemExit(1)
+
+    print("[RESULT] PASS")
+    raise SystemExit(0)
 
 
 if __name__ == "__main__":

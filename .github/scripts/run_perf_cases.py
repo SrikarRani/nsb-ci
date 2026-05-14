@@ -18,6 +18,9 @@ SUMMARY_FIELDS = [
     "received",
     "dropped",
     "drop_rate_percent",
+    "hash_failures",
+    "parse_failures",
+    "unexpected_msgs",
     "avg_rtt_s",
     "p50_rtt_s",
     "p95_rtt_s",
@@ -76,6 +79,9 @@ def parse_metrics(run_dir: Path) -> dict[str, str]:
         "received": "NA",
         "dropped": "NA",
         "drop_rate_percent": "NA",
+        "hash_failures": "NA",
+        "parse_failures": "NA",
+        "unexpected_msgs": "NA",
         "avg_rtt_s": "NA",
         "p50_rtt_s": "NA",
         "p95_rtt_s": "NA",
@@ -93,6 +99,9 @@ def parse_metrics(run_dir: Path) -> dict[str, str]:
         metrics["received"] = extract_value(r"^\s*received:\s+([0-9]+)", text)
         metrics["dropped"] = extract_value(r"^\s*dropped:\s+([0-9]+)", text)
         metrics["drop_rate_percent"] = extract_value(r"^\s*dropped:.*\(([0-9.]+)%\)", text)
+        metrics["hash_failures"] = extract_value(r"^\s*hash_err:\s+([0-9]+)", text)
+        metrics["parse_failures"] = extract_value(r"parse_err:\s+([0-9]+)", text)
+        metrics["unexpected_msgs"] = extract_value(r"unexpected:\s+([0-9]+)", text)
         metrics["avg_rtt_s"] = extract_value(r"avg=([0-9.]+)s", text)
         metrics["p50_rtt_s"] = extract_value(r"p50=([0-9.]+)s", text)
         metrics["p95_rtt_s"] = extract_value(r"p95=([0-9.]+)s", text)
@@ -182,7 +191,20 @@ def main() -> int:
         writer.writerows(rows)
 
     print(f"\nCurated ghost perf suite complete. Summary CSV: {summary_csv}")
-    failed = [row for row in rows if row["exit_code"] != "0"]
+    required_fields = (
+        "sent",
+        "received",
+        "dropped",
+        "drop_rate_percent",
+        "hash_failures",
+        "parse_failures",
+        "unexpected_msgs",
+    )
+    failed = [
+        row
+        for row in rows
+        if row["exit_code"] != "0" or any(row[field] == "NA" for field in required_fields)
+    ]
     return 1 if failed else 0
 
 

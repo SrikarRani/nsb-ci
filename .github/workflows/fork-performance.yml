@@ -39,7 +39,7 @@ on:
       max_drop_rate_percent:
         description: "Optional failure threshold for drop_rate_percent"
         required: false
-        default: ""
+        default: "0"
         type: string
 
 permissions:
@@ -57,7 +57,7 @@ jobs:
       MAX_AVG_RTT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_rtt_s || '' }}
       MAX_AVG_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_cpu_percent || '' }}
       MAX_PEAK_MEMORY_MB: ${{ github.event_name == 'workflow_dispatch' && inputs.max_peak_memory_mb || '' }}
-      MAX_DROP_RATE_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_drop_rate_percent || '' }}
+      MAX_DROP_RATE_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_drop_rate_percent || '0' }}
 
     steps:
       - name: Check out NSB

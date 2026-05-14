@@ -34,6 +34,7 @@ def load_rows(csv_path: str):
             avg_rtt = to_float(row.get("avg_rtt_s"))
             avg_cpu = to_float(row.get("avg_cpu_percent"))
             peak_mem = to_float(row.get("peak_memory_mb"))
+            drop_rate = to_float(row.get("drop_rate_percent"))
             if nodes is None or rate is None:
                 continue
             rows.append(
@@ -43,6 +44,7 @@ def load_rows(csv_path: str):
                     "avg_rtt_s": avg_rtt,
                     "avg_cpu_percent": avg_cpu,
                     "peak_memory_mb": peak_mem,
+                    "drop_rate_percent": drop_rate,
                 }
             )
     return rows
@@ -97,6 +99,13 @@ def main() -> None:
         y_label="Average RTT (s)",
         title="Average RTT vs Message Rate",
         out_path=os.path.join(args.out_dir, "avg_rtt_vs_rate.png"),
+    )
+    plot_metric(
+        rows,
+        metric_key="drop_rate_percent",
+        y_label="Drop Rate (%)",
+        title="Drop Rate vs Message Rate",
+        out_path=os.path.join(args.out_dir, "drop_rate_vs_rate.png"),
     )
     plot_metric(
         rows,

@@ -49,8 +49,8 @@ def main() -> int:
     else:
         lines.extend(
             [
-                "| Case | Status | Sent | Received | Drop % | Avg RTT (s) | P95 RTT (s) | Avg CPU % | Peak Mem (MB) |",
-                "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+                "| Case | Status | Sent | Received | Drop % | Errors (hash/parse/unexpected) | Avg RTT (s) | P95 RTT (s) | Avg CPU % | Peak Mem (MB) |",
+                "| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |",
             ]
         )
         for row in rows:
@@ -58,7 +58,16 @@ def main() -> int:
                 f"n{row.get('nodes', 'NA')} @ r{row.get('rate', 'NA')}"
                 f" for {row.get('duration_s', 'NA')}s"
             )
-            status = "PASS" if row.get("exit_code") == "0" else "FAIL"
+            complete = all(
+                row.get(field, "NA") != "NA"
+                for field in ("sent", "received", "dropped", "drop_rate_percent")
+            )
+            status = "PASS" if row.get("exit_code") == "0" and complete else "FAIL"
+            errors = (
+                f"{row.get('hash_failures', 'NA')}/"
+                f"{row.get('parse_failures', 'NA')}/"
+                f"{row.get('unexpected_msgs', 'NA')}"
+            )
             lines.append(
                 "| "
                 + " | ".join(
@@ -68,6 +77,7 @@ def main() -> int:
                         row.get("sent", "NA"),
                         row.get("received", "NA"),
                         row.get("drop_rate_percent", "NA"),
+                        errors,
                         row.get("avg_rtt_s", "NA"),
                         row.get("p95_rtt_s", "NA"),
                         row.get("avg_cpu_percent", "NA"),
