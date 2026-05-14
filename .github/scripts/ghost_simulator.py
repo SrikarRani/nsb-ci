@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""Minimal ghost simulator for NSB CI perf runs."""
+"""Minimal ghost simulator for NSB CI perf runs.
+
+In NSB PULL mode the simulator must actively poll with ``fetch()``; waiting on
+``listen()`` only works in PUSH mode and will stall with messages stuck in the
+daemon transmit buffer.
+"""
 
 from __future__ import annotations
 
 import argparse
-import asyncio
 import logging
 import signal
 import sys
+import time
 from pathlib import Path
 
 
@@ -33,20 +38,22 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-async def run(args: argparse.Namespace) -> int:
+STOP_REQUESTED = False
+
+
+def _request_stop(*_args) -> None:
+    global STOP_REQUESTED
+    STOP_REQUESTED = True
+
+
+def run(args: argparse.Namespace) -> int:
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper(), logging.INFO),
         format="[ghost-sim] %(message)s",
     )
     logger = logging.getLogger("ghost-sim")
-    stop_event = asyncio.Event()
-
-    loop = asyncio.get_running_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, stop_event.set)
-        except NotImplementedError:
-            pass
+        signal.signal(sig, _request_stop)
 
     sim = NSBSimClient(args.identifier, args.server_host, args.server_port)
     logger.info(
@@ -57,19 +64,18 @@ async def run(args: argparse.Namespace) -> int:
     )
 
     relayed = 0
-    while not stop_event.is_set():
+    while not STOP_REQUESTED:
         try:
-            msg = await sim.listen()
-        except asyncio.CancelledError:
-            break
+            msg = sim.fetch(timeout=1)
         except Exception as exc:  # pragma: no cover - defensive for CI runtime
-            logger.exception("Simulator listen failed: %s", exc)
+            logger.exception("Simulator fetch failed: %s", exc)
             return 1
 
         if not msg:
+            time.sleep(0.05)
             continue
 
-        payload = msg.payload if getattr(msg, "payload", None) else b""
+        payload = getattr(msg, "payload", b"") or b""
         sim.post(msg.src_id, msg.dest_id, payload)
         relayed += 1
         if relayed % 50 == 0:
@@ -80,7 +86,7 @@ async def run(args: argparse.Namespace) -> int:
 
 
 def main() -> int:
-    return asyncio.run(run(parse_args()))
+    return run(parse_args())
 
 
 if __name__ == "__main__":
