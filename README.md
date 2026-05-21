@@ -22,6 +22,26 @@
   </tr>
 </table>
 
+## Table of Contents
+- [Contact & Collaborate](#contact--collaborate)
+- [Installation](#installation)
+  - [Prerequisites](#prerequisites)
+  - [Build](#build)
+  - [Uninstallation](#uninstallation)
+  - [MacOS via Homebrew](#macos-via-homebrew)
+  - [Windows via vcpkg](#windows-via-vcpkg)
+  - [Linux](#linux)
+- [Basic Usage](#basic-usage)
+  - [Programming Interface](#programming-interface)
+    - [Adding NSB in Projects](#adding-nsb-in-projects)
+    - [NSBAppClient Interface](#nsbappclient-interface)
+    - [NSBSimClient Interface](#nsbsimclient-interface)
+  - [System Configuration](#system-configuration)
+  - [Running Your System](#running-your-system)
+- [Extensibility](#extensibility)
+- [Acknowledgments](#acknowledgments)
+- [License](#_license---bsd_)
+
 ## Contact & Collaborate
 
 NSB was first created to address real research needs at the [Inter-Networking Research Group](https://inrg.engineering.ucsc.edu/) at the University of California, Santa Cruz. The first [proofs-of-concept](https://dl.acm.org/doi/abs/10.1145/3616391.3622771) that leveraged NSB included decentralized federated learning and autonomous vehicle platooning. While core development is active as of February 2026, we invite collaborators and users to help us in that process and to develop domain-specific and/or usage-specific solutions.

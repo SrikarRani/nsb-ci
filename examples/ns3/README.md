@@ -1,3 +1,8 @@
+## Table of Contents
+- [Installing ns-3](#installing-ns-3)
+- [Linking NSB with ns-3 through the CMakeLists.txt](#linking-nsb-with-ns-3-through-the-cmakeliststxt)
+- [Testing with a simple AppClient script](#testing-with-a-simple-appclient-script)
+
 ### **Installing ns-3** 
 
 Here we cover the detailed steps for integrating NSB with the ns-3
