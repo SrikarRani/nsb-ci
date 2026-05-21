@@ -2,6 +2,21 @@
 
 C++ client library for NSB using RabbitMQ as the message transport. Provides `NSBAppClientRMQ` (application send/receive) and `NSBSimClientRMQ` (simulator fetch/post), plus a standalone C++ daemon.
 
+## Table of Contents
+- [Prerequisites](#prerequisites)
+  - [macOS (Homebrew)](#macos-homebrew)
+  - [RabbitMQ Broker](#rabbitmq-broker)
+- [Build](#build)
+- [Run](#run)
+  - [RabbitMQ backend](#rabbitmq-backend)
+  - [Socket backend](#socket-backend)
+- [API Overview](#api-overview)
+  - [Class Hierarchy](#class-hierarchy)
+  - [NSBAppClientRMQ](#nsbappclientrmq)
+  - [NSBSimClientRMQ](#nsbsimclientrmq)
+  - [NSBDaemonRMQ](#nsbdaemonrmq)
+  - [Config & MessageEntry](#config--messageentry)
+
 ## Prerequisites
 
 ### macOS (Homebrew)

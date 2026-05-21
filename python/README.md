@@ -1,5 +1,19 @@
 # NSB Client API in Python
 
+## Table of Contents
+- [Adding the Client Module](#adding-the-client-module)
+- [Basic API Usage](#basic-api-usage)
+  - [The MessageEntry Object](#the-messageentry-object)
+  - [NSB Application Client (NSBAppClient)](#nsb-application-client-nsbappclient)
+    - [Sending Payloads (send)](#sending-payloads-send)
+    - [Receiving Payloads (receive)](#receiving-payloads-receive)
+    - [Listening for Payloads (listen)](#listening-for-payloads-listen)
+  - [NSB Simulator Client (NSBSimClient)](#nsb-simulator-client-nsbsimclient)
+    - [Fetching Payloads for Simulation (fetch)](#fetching-payloads-for-simulation-fetch)
+    - [Listening to Fetch Payloads (listen)](#listening-to-fetch-payloads-listen)
+    - [Posting an Arrived Payload (post)](#posting-an-arrived-payload-post)
+- [Additional Documentation via Doxygen](#additional-documentation-via-doxygen)
+
 ## Adding the Client Module
 _Installable Python package coming soon._
 
