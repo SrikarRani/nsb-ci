@@ -1,5 +1,6 @@
 import socket
 import select
+import selectors
 import time
 try:
     import nsb_proto.nsb_pb2 as nsb_pb2
@@ -256,8 +257,19 @@ class SocketInterface(Comms):
         Attempts to shutdown the socket, then closes.
         """
         for _, conn in self.conns.items():
-            conn.shutdown(socket.SHUT_WR)
+            try:
+                conn.shutdown(socket.SHUT_WR)
+            except OSError:
+                pass
             conn.close()
+
+    def _wait_for_socket(self, channel: Comms.Channels, events: int, timeout: Optional[float] = None) -> bool:
+        selector = selectors.DefaultSelector()
+        try:
+            selector.register(self.conns[channel], events)
+            return bool(selector.select(timeout))
+        finally:
+            selector.close()
 
     def _send_msg(self, channel:Comms.Channels, message:bytes):
         """
@@ -272,17 +284,19 @@ class SocketInterface(Comms):
         @exception RuntimeError Raised if the socket connection is broken or 
                                 if the socket is not ready to send.
         """
-        # Wait to write.
-        _, ready_to_send, _ = select.select([], [self.conns[channel]], [])
-        if ready_to_send:
-            # Send bytes, buffer by buffer if necessary.
-            while len(message):
-                bytes_sent = self.conns[channel].send(message, SEND_BUFFER_SIZE)
+        if not self._wait_for_socket(channel, selectors.EVENT_WRITE):
+            raise RuntimeError("Socket not ready to send, cannot send message.")
+
+        payload = memoryview(message)
+        while len(payload):
+            try:
+                bytes_sent = self.conns[channel].send(payload[:SEND_BUFFER_SIZE])
                 if bytes_sent == 0:
                     raise RuntimeError("Socket connection broken, nothing sent.")
-                message = message[bytes_sent:]
-        else:
-            self.logger.error("Socket not ready to send, cannot send message.")
+                payload = payload[bytes_sent:]
+            except (BlockingIOError, InterruptedError):
+                if not self._wait_for_socket(channel, selectors.EVENT_WRITE):
+                    raise RuntimeError("Socket not ready to send, cannot send message.")
 
     def _recv_msg(self, channel:Comms.Channels, timeout:Optional[int]=None):
         """
@@ -296,32 +310,27 @@ class SocketInterface(Comms):
         @param timeout Maximum time in seconds to wait for a response from the
                        server. If None, it will wait indefinitely.
         """
-        # Wait to select or timeout.
-        args = [[self.conns[channel]], [], []]
-        if timeout is not None:
-            args.append(timeout)
-        ready_to_read, _, _ = select.select(*args)
-        # Start reading in chunk by chunk.
-        if len(ready_to_read) == 0:
+        if not self._wait_for_socket(channel, selectors.EVENT_READ, timeout):
             self.logger.error(f"Timed out after {timeout} seconds.")
             return None
-        elif len(ready_to_read) > 0:
-            data = b''
-            while True:
-                try:
-                    chunk = self.conns[channel].recv(RECEIVE_BUFFER_SIZE)
-                    data += chunk
-                    # If chunk is less than the buffer size, we're done.
-                    if len(chunk) < RECEIVE_BUFFER_SIZE:
-                        return data if len(data) else None
-                    # Otherwise, poll to see if there's more waiting.
-                    else:
-                        _fd, _, _ = select.select([self.conns[channel]], [], [], 0)
-                        if not len(_fd):
-                            return data if len(data) else None
-                except socket.error as e:
-                    print(f"Socket error: {e}")
-                    return None
+
+        data = b''
+        while True:
+            try:
+                chunk = self.conns[channel].recv(RECEIVE_BUFFER_SIZE)
+                data += chunk
+                if len(chunk) == 0:
+                    return data if len(data) else None
+                if len(chunk) < RECEIVE_BUFFER_SIZE:
+                    return data if len(data) else None
+                if not self._wait_for_socket(channel, selectors.EVENT_READ, 0):
+                    return data if len(data) else None
+            except (BlockingIOError, InterruptedError):
+                if not self._wait_for_socket(channel, selectors.EVENT_READ, 0):
+                    return data if len(data) else None
+            except socket.error as e:
+                print(f"Socket error: {e}")
+                return None
         return None
     
     async def _listen_msg(self, channel:Comms.Channels):
@@ -342,12 +351,13 @@ class SocketInterface(Comms):
                 chunk = await asyncio.get_event_loop().sock_recv(self.conns[channel], RECEIVE_BUFFER_SIZE)
                 data += chunk
                 # If chunk is less than the buffer size, we're done.
+                if len(chunk) == 0:
+                    return data if len(data) else None
                 if len(chunk) < RECEIVE_BUFFER_SIZE:
                     return data if len(data) else None
                 # Otherwise, poll to see if there's more waiting.
                 else:
-                    _fd, _, _ = select.select([self.conns[channel]], [], [], 0)
-                    if not len(_fd):
+                    if not self._wait_for_socket(channel, selectors.EVENT_READ, 0):
                         return data if len(data) else None
             except socket.error as e:
                 print(f"Socket error: {e}")
@@ -576,7 +586,7 @@ class NSBClient:
         self.comms._send_msg(Comms.Channels.CTRL, nsb_msg.SerializeToString())
         self.logger.debug(f"Sent INIT! Waiting...")
         response = self.comms._recv_msg(Comms.Channels.CTRL, timeout=DAEMON_RESPONSE_TIMEOUT)
-        if len(response):
+        if response:
                 # Parse in message.
                 nsb_resp = nsb_pb2.nsbm()
                 nsb_resp.ParseFromString(response)
@@ -621,7 +631,7 @@ class NSBClient:
         self.comms._send_msg(Comms.Channels.CTRL, nsb_msg.SerializeToString())
         self.logger.info("PING: Pinged server.")
         response = self.comms._recv_msg(Comms.Channels.CTRL, timeout=timeout)
-        if len(response):
+        if response:
             # Parse in message.
             nsb_resp = nsb_pb2.nsbm()
             nsb_resp.ParseFromString(response)
