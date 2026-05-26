@@ -4,6 +4,35 @@
 
 namespace nsb {
 
+    namespace {
+        MessageEntry::TraceEntry traceFromMetadata(const nsb::nsbm::Metadata& metadata) {
+            MessageEntry::TraceEntry trace;
+            if (metadata.has_trace()) {
+                const auto& proto_trace = metadata.trace();
+                trace.msg_id = proto_trace.msg_id();
+                trace.t_app_send_ns = proto_trace.t_app_send_ns();
+                trace.t_daemon_send_ingress_ns = proto_trace.t_daemon_send_ingress_ns();
+                trace.t_daemon_fetch_egress_ns = proto_trace.t_daemon_fetch_egress_ns();
+                trace.t_daemon_post_ingress_ns = proto_trace.t_daemon_post_ingress_ns();
+                trace.t_daemon_receive_egress_ns = proto_trace.t_daemon_receive_egress_ns();
+            }
+            return trace;
+        }
+
+        void applyTraceToMetadata(const MessageEntry::TraceEntry* trace, nsb::nsbm::Metadata* metadata) {
+            if (trace == nullptr || !trace->hasData()) {
+                return;
+            }
+            nsb::nsbm::Metadata::Trace* proto_trace = metadata->mutable_trace();
+            proto_trace->set_msg_id(trace->msg_id);
+            proto_trace->set_t_app_send_ns(trace->t_app_send_ns);
+            proto_trace->set_t_daemon_send_ingress_ns(trace->t_daemon_send_ingress_ns);
+            proto_trace->set_t_daemon_fetch_egress_ns(trace->t_daemon_fetch_egress_ns);
+            proto_trace->set_t_daemon_post_ingress_ns(trace->t_daemon_post_ingress_ns);
+            proto_trace->set_t_daemon_receive_egress_ns(trace->t_daemon_receive_egress_ns);
+        }
+    }
+
     NSBClient::NSBClient(const std::string& identifier, std::string serverAddress, int serverPort) : 
         clientId(std::move(identifier)), comms(SocketInterface(serverAddress, serverPort)),
         originIndicator(nullptr), db(nullptr) {}
@@ -194,7 +223,8 @@ namespace nsb {
         }
     }
 
-    std::string NSBAppClient::send(const std::string destId, std::string payload) {
+    std::string NSBAppClient::send(const std::string destId, std::string payload,
+                                   const MessageEntry::TraceEntry* trace) {
         // Create and populate a SEND message.
         nsb::nsbm nsbMsg = nsb::nsbm();
         nsb::nsbm::Manifest* mutableManifest = nsbMsg.mutable_manifest();
@@ -205,6 +235,7 @@ namespace nsb {
         mutableMetadata->set_src_id(clientId);
         mutableMetadata->set_dest_id(destId);
         mutableMetadata->set_payload_size(static_cast<int>(payload.size()));
+        applyTraceToMetadata(trace, mutableMetadata);
         // Set return to "" by default.
         std::string key = "";
         if (cfg.USE_DB) {
@@ -262,7 +293,8 @@ namespace nsb {
                 nsbMsg->metadata().src_id(),
                 nsbMsg->metadata().dest_id(),
                 payload,
-                nsbMsg->metadata().payload_size()
+                nsbMsg->metadata().payload_size(),
+                traceFromMetadata(nsbMsg->metadata())
             );
             return receivedPayload;
         } else if (manifest.code() == nsb::nsbm::Manifest::NO_MESSAGE) {
@@ -338,7 +370,8 @@ namespace nsb {
                 nsbMsg->metadata().src_id(),
                 nsbMsg->metadata().dest_id(),
                 payload,
-                nsbMsg->metadata().payload_size()
+                nsbMsg->metadata().payload_size(),
+                traceFromMetadata(nsbMsg->metadata())
             );
             return fetchedMessage;
         } else if (manifest.code() == nsb::nsbm::Manifest::NO_MESSAGE) {
@@ -354,7 +387,8 @@ namespace nsb {
         }
     }
 
-    std::string NSBSimClient::post(std::string srcId, std::string destId, std::string &payload) {
+    std::string NSBSimClient::post(std::string srcId, std::string destId, std::string &payload,
+                                   const MessageEntry::TraceEntry* trace) {
         // // Create and populate a POST message.
         // nsb::nsbm nsbMsg = nsb::nsbm();
         // nsb::nsbm::Manifest* mutableManifest = nsbMsg.mutable_manifest();
@@ -388,6 +422,7 @@ namespace nsb {
         mutableMetadata->set_src_id(srcId);
         mutableMetadata->set_dest_id(destId);
         mutableMetadata->set_payload_size(static_cast<int>(payload.size()));
+        applyTraceToMetadata(trace, mutableMetadata);
         // Set return to "" by default.
         std::string key = "";
         if (cfg.USE_DB) {

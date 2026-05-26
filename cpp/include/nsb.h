@@ -4,6 +4,7 @@
 #define NSB_H
 
 #include <string>
+#include <cstdint>
 #include <list>
 #include <vector>
 #include <map>
@@ -140,6 +141,22 @@ namespace nsb {
      * 
      */
     struct MessageEntry {
+        struct TraceEntry {
+            std::string msg_id;
+            std::uint64_t t_app_send_ns;
+            std::uint64_t t_daemon_send_ingress_ns;
+            std::uint64_t t_daemon_fetch_egress_ns;
+            std::uint64_t t_daemon_post_ingress_ns;
+            std::uint64_t t_daemon_receive_egress_ns;
+            TraceEntry() : msg_id(""), t_app_send_ns(0), t_daemon_send_ingress_ns(0),
+                           t_daemon_fetch_egress_ns(0), t_daemon_post_ingress_ns(0),
+                           t_daemon_receive_egress_ns(0) {}
+            bool hasData() const {
+                return !msg_id.empty() || t_app_send_ns != 0 || t_daemon_send_ingress_ns != 0 ||
+                       t_daemon_fetch_egress_ns != 0 || t_daemon_post_ingress_ns != 0 ||
+                       t_daemon_receive_egress_ns != 0;
+            }
+        };
         /** @brief The source identifier. */
         std::string source;
         /** @brief The destination identifier. */
@@ -148,13 +165,16 @@ namespace nsb {
         std::string payload_obj;
         /** @brief The size of the payload. */
         int payload_size;
+        /** @brief Optional trace metadata carried alongside the payload. */
+        TraceEntry trace;
         // Constructors.
         /** @brief Blank constructor. */
-        MessageEntry() : source(""), destination(""), payload_obj(""), payload_size(0) {}
+        MessageEntry() : source(""), destination(""), payload_obj(""), payload_size(0), trace() {}
         /** @brief Populated constructor. */
-        MessageEntry(std::string src, std::string dest, std::string data, int size)
+        MessageEntry(std::string src, std::string dest, std::string data, int size,
+                     TraceEntry msg_trace = TraceEntry())
             : source(std::move(src)), destination(std::move(dest)),
-              payload_obj(std::move(data)), payload_size(size){}
+              payload_obj(std::move(data)), payload_size(size), trace(std::move(msg_trace)){}
         /**
          * @brief Checks if the message entry is populated.
          * 

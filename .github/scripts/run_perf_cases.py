@@ -27,6 +27,25 @@ SUMMARY_FIELDS = [
     "p99_rtt_s",
     "min_rtt_s",
     "max_rtt_s",
+    "trace_samples",
+    "daemon_roundtrip_avg_s",
+    "daemon_roundtrip_p50_s",
+    "daemon_roundtrip_p95_s",
+    "daemon_roundtrip_p99_s",
+    "daemon_roundtrip_min_s",
+    "daemon_roundtrip_max_s",
+    "nsb_residence_avg_s",
+    "nsb_residence_p50_s",
+    "nsb_residence_p95_s",
+    "nsb_residence_p99_s",
+    "nsb_residence_min_s",
+    "nsb_residence_max_s",
+    "sim_turnaround_avg_s",
+    "sim_turnaround_p50_s",
+    "sim_turnaround_p95_s",
+    "sim_turnaround_p99_s",
+    "sim_turnaround_min_s",
+    "sim_turnaround_max_s",
     "avg_cpu_percent",
     "peak_memory_mb",
     "run_dir",
@@ -88,6 +107,25 @@ def parse_metrics(run_dir: Path) -> dict[str, str]:
         "p99_rtt_s": "NA",
         "min_rtt_s": "NA",
         "max_rtt_s": "NA",
+        "trace_samples": "NA",
+        "daemon_roundtrip_avg_s": "NA",
+        "daemon_roundtrip_p50_s": "NA",
+        "daemon_roundtrip_p95_s": "NA",
+        "daemon_roundtrip_p99_s": "NA",
+        "daemon_roundtrip_min_s": "NA",
+        "daemon_roundtrip_max_s": "NA",
+        "nsb_residence_avg_s": "NA",
+        "nsb_residence_p50_s": "NA",
+        "nsb_residence_p95_s": "NA",
+        "nsb_residence_p99_s": "NA",
+        "nsb_residence_min_s": "NA",
+        "nsb_residence_max_s": "NA",
+        "sim_turnaround_avg_s": "NA",
+        "sim_turnaround_p50_s": "NA",
+        "sim_turnaround_p95_s": "NA",
+        "sim_turnaround_p99_s": "NA",
+        "sim_turnaround_min_s": "NA",
+        "sim_turnaround_max_s": "NA",
         "avg_cpu_percent": "NA",
         "peak_memory_mb": "NA",
     }
@@ -108,6 +146,47 @@ def parse_metrics(run_dir: Path) -> dict[str, str]:
         metrics["p99_rtt_s"] = extract_value(r"p99=([0-9.]+)s", text)
         metrics["min_rtt_s"] = extract_value(r"min=([0-9.]+)s", text)
         metrics["max_rtt_s"] = extract_value(r"max=([0-9.]+)s", text)
+        metrics["trace_samples"] = extract_value(r"^\s*trace:\s+samples=([0-9]+)", text)
+        metrics["daemon_roundtrip_avg_s"] = extract_value(r"^\s*daemon:\s+avg=([0-9.]+)s", text)
+        metrics["daemon_roundtrip_p50_s"] = extract_value(r"^\s*daemon:\s+avg=[0-9.]+s\s+p50=([0-9.]+)s", text)
+        metrics["daemon_roundtrip_p95_s"] = extract_value(r"^\s*daemon:\s+.*p95=([0-9.]+)s", text)
+        metrics["daemon_roundtrip_p99_s"] = extract_value(r"^\s*daemon:\s+.*p99=([0-9.]+)s", text)
+        metrics["daemon_roundtrip_min_s"] = extract_value(r"^\s*min=([0-9.]+)s\s+max=[0-9.]+s", text)
+        metrics["daemon_roundtrip_max_s"] = extract_value(r"^\s*min=[0-9.]+s\s+max=([0-9.]+)s", text)
+        metrics["nsb_residence_avg_s"] = extract_value(r"^\s*nsb:\s+avg=([0-9.]+)s", text)
+        metrics["nsb_residence_p50_s"] = extract_value(r"^\s*nsb:\s+avg=[0-9.]+s\s+p50=([0-9.]+)s", text)
+        metrics["nsb_residence_p95_s"] = extract_value(r"^\s*nsb:\s+.*p95=([0-9.]+)s", text)
+        metrics["nsb_residence_p99_s"] = extract_value(r"^\s*nsb:\s+.*p99=([0-9.]+)s", text)
+        metrics["nsb_residence_min_s"] = extract_value(r"^\s*min=([0-9.]+)s\s+max=[0-9.]+s", text)
+        metrics["nsb_residence_max_s"] = extract_value(r"^\s*min=[0-9.]+s\s+max=([0-9.]+)s", text)
+        metrics["sim_turnaround_avg_s"] = extract_value(r"^\s*sim:\s+avg=([0-9.]+)s", text)
+        metrics["sim_turnaround_p50_s"] = extract_value(r"^\s*sim:\s+avg=[0-9.]+s\s+p50=([0-9.]+)s", text)
+        metrics["sim_turnaround_p95_s"] = extract_value(r"^\s*sim:\s+.*p95=([0-9.]+)s", text)
+        metrics["sim_turnaround_p99_s"] = extract_value(r"^\s*sim:\s+.*p99=([0-9.]+)s", text)
+        sim_minmax = re.search(
+            r"^\s*sim:\s+.*\n\s*min=([0-9.]+)s\s+max=([0-9.]+)s",
+            text,
+            re.MULTILINE,
+        )
+        if sim_minmax:
+            metrics["sim_turnaround_min_s"] = sim_minmax.group(1)
+            metrics["sim_turnaround_max_s"] = sim_minmax.group(2)
+        daemon_minmax = re.search(
+            r"^\s*daemon:\s+.*\n\s*min=([0-9.]+)s\s+max=([0-9.]+)s",
+            text,
+            re.MULTILINE,
+        )
+        if daemon_minmax:
+            metrics["daemon_roundtrip_min_s"] = daemon_minmax.group(1)
+            metrics["daemon_roundtrip_max_s"] = daemon_minmax.group(2)
+        nsb_minmax = re.search(
+            r"^\s*nsb:\s+.*\n\s*min=([0-9.]+)s\s+max=([0-9.]+)s",
+            text,
+            re.MULTILINE,
+        )
+        if nsb_minmax:
+            metrics["nsb_residence_min_s"] = nsb_minmax.group(1)
+            metrics["nsb_residence_max_s"] = nsb_minmax.group(2)
 
     resource_stats = run_dir / "daemon_resource_stats.txt"
     if resource_stats.is_file():
@@ -199,11 +278,17 @@ def main() -> int:
         "hash_failures",
         "parse_failures",
         "unexpected_msgs",
+        "trace_samples",
+        "daemon_roundtrip_avg_s",
+        "nsb_residence_avg_s",
+        "sim_turnaround_avg_s",
     )
     failed = [
         row
         for row in rows
-        if row["exit_code"] != "0" or any(row[field] == "NA" for field in required_fields)
+        if row["exit_code"] != "0"
+        or any(row[field] == "NA" for field in required_fields)
+        or row["trace_samples"] == "0"
     ]
     return 1 if failed else 0
 

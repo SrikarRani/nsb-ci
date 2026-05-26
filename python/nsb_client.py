@@ -122,13 +122,42 @@ class Config:
         if self.use_db:
             s += f" | DB Address: {self.db_address} | DB Port: {self.db_port}"
         return s
-    
+
+class TraceEntry:
+    def __init__(
+        self,
+        msg_id: str = "",
+        t_app_send_ns: int = 0,
+        t_daemon_send_ingress_ns: int = 0,
+        t_daemon_fetch_egress_ns: int = 0,
+        t_daemon_post_ingress_ns: int = 0,
+        t_daemon_receive_egress_ns: int = 0,
+    ):
+        self.msg_id = msg_id
+        self.t_app_send_ns = int(t_app_send_ns)
+        self.t_daemon_send_ingress_ns = int(t_daemon_send_ingress_ns)
+        self.t_daemon_fetch_egress_ns = int(t_daemon_fetch_egress_ns)
+        self.t_daemon_post_ingress_ns = int(t_daemon_post_ingress_ns)
+        self.t_daemon_receive_egress_ns = int(t_daemon_receive_egress_ns)
+
+    def has_data(self):
+        return bool(
+            self.msg_id
+            or self.t_app_send_ns
+            or self.t_daemon_send_ingress_ns
+            or self.t_daemon_fetch_egress_ns
+            or self.t_daemon_post_ingress_ns
+            or self.t_daemon_receive_egress_ns
+        )
+
+
 class MessageEntry:
-    def __init__(self, src_id, dest_id, payload):
+    def __init__(self, src_id, dest_id, payload, trace: Optional[TraceEntry] = None):
         self.src_id = src_id
         self.dest_id = dest_id
         self.payload = payload
         self.payload_size = len(payload)
+        self.trace = trace if trace is not None else TraceEntry()
 
 ### COMMUNICATION INTERFACES ###
 
@@ -635,6 +664,43 @@ class NSBClient:
         else:
             msg.payload = payload_obj
 
+    def msg_get_trace(self, msg):
+        if msg.HasField("metadata") and msg.metadata.HasField("trace"):
+            trace = msg.metadata.trace
+            return TraceEntry(
+                msg_id=trace.msg_id,
+                t_app_send_ns=trace.t_app_send_ns,
+                t_daemon_send_ingress_ns=trace.t_daemon_send_ingress_ns,
+                t_daemon_fetch_egress_ns=trace.t_daemon_fetch_egress_ns,
+                t_daemon_post_ingress_ns=trace.t_daemon_post_ingress_ns,
+                t_daemon_receive_egress_ns=trace.t_daemon_receive_egress_ns,
+            )
+        return TraceEntry()
+
+    def msg_set_trace(self, trace, msg):
+        if trace is None:
+            return
+        if isinstance(trace, dict):
+            trace = TraceEntry(**trace)
+        if not isinstance(trace, TraceEntry):
+            trace = TraceEntry(
+                msg_id=getattr(trace, "msg_id", ""),
+                t_app_send_ns=getattr(trace, "t_app_send_ns", 0),
+                t_daemon_send_ingress_ns=getattr(trace, "t_daemon_send_ingress_ns", 0),
+                t_daemon_fetch_egress_ns=getattr(trace, "t_daemon_fetch_egress_ns", 0),
+                t_daemon_post_ingress_ns=getattr(trace, "t_daemon_post_ingress_ns", 0),
+                t_daemon_receive_egress_ns=getattr(trace, "t_daemon_receive_egress_ns", 0),
+            )
+        if not trace.has_data():
+            return
+        proto_trace = msg.metadata.trace
+        proto_trace.msg_id = trace.msg_id
+        proto_trace.t_app_send_ns = trace.t_app_send_ns
+        proto_trace.t_daemon_send_ingress_ns = trace.t_daemon_send_ingress_ns
+        proto_trace.t_daemon_fetch_egress_ns = trace.t_daemon_fetch_egress_ns
+        proto_trace.t_daemon_post_ingress_ns = trace.t_daemon_post_ingress_ns
+        proto_trace.t_daemon_receive_egress_ns = trace.t_daemon_receive_egress_ns
+
 
 ### NSB Application Client ###
 
@@ -665,7 +731,7 @@ class NSBAppClient(NSBClient):
         self.og_indicator = nsb_pb2.nsbm.Manifest.Originator.APP_CLIENT
         self.initialize()
         
-    def send(self, dest_id:str, payload:bytes):
+    def send(self, dest_id:str, payload:bytes, trace: Optional[TraceEntry]=None):
         """
         @brief Sends a payload to the specified destination via NSB.
         
@@ -689,6 +755,7 @@ class NSBAppClient(NSBClient):
         nsb_msg.metadata.src_id = self._id
         nsb_msg.metadata.dest_id = dest_id
         nsb_msg.metadata.payload_size = len(payload)
+        self.msg_set_trace(trace, nsb_msg)
         # Send message and retrieve key if necessary.
         key = None
         if self.cfg.use_db:
@@ -783,7 +850,8 @@ class NSBAppClient(NSBClient):
                     # Pack the payload into a MessageEntry.
                     return MessageEntry(src_id=nsb_resp.metadata.src_id,
                                         dest_id=nsb_resp.metadata.dest_id,
-                                        payload=payload)
+                                        payload=payload,
+                                        trace=self.msg_get_trace(nsb_resp))
                 elif nsb_resp.manifest.code == nsb_pb2.nsbm.Manifest.OpCode.NO_MESSAGE:
                     self.logger.debug("RECEIVE: Yikes, no message.")
                     return None
@@ -827,7 +895,8 @@ class NSBAppClient(NSBClient):
                     # Pack the payload into a MessageEntry.
                     return MessageEntry(src_id=nsb_resp.metadata.src_id,
                                         dest_id=nsb_resp.metadata.dest_id,
-                                        payload=payload)
+                                        payload=payload,
+                                        trace=self.msg_get_trace(nsb_resp))
                 elif nsb_resp.manifest.code == nsb_pb2.nsbm.Manifest.OpCode.NO_MESSAGE:
                     self.logger.info("LISTEN: Yikes, no message.")
                     return None
@@ -931,7 +1000,8 @@ class NSBSimClient(NSBClient):
                     # Pack the payload into a MessageEntry.
                     return MessageEntry(src_id=nsb_resp.metadata.src_id,
                                         dest_id=nsb_resp.metadata.dest_id,
-                                        payload=payload)
+                                        payload=payload,
+                                        trace=self.msg_get_trace(nsb_resp))
                 elif nsb_resp.manifest.code == nsb_pb2.nsbm.Manifest.OpCode.NO_MESSAGE:
                     print("FETCH: Yikes, no message.")
                     return None
@@ -981,7 +1051,8 @@ class NSBSimClient(NSBClient):
                     # Pack the payload into a MessageEntry.
                     return MessageEntry(src_id=nsb_resp.metadata.src_id,
                                         dest_id=nsb_resp.metadata.dest_id,
-                                        payload=payload)
+                                        payload=payload,
+                                        trace=self.msg_get_trace(nsb_resp))
                 elif nsb_resp.manifest.code == nsb_pb2.nsbm.Manifest.OpCode.NO_MESSAGE:
                     print("LISTEN: Yikes, no message.")
                     return None
@@ -990,7 +1061,7 @@ class NSBSimClient(NSBClient):
         else:
             return None
         
-    def post(self, src_id:str, dest_id:str, payload:bytes):
+    def post(self, src_id:str, dest_id:str, payload:bytes, trace: Optional[TraceEntry]=None):
         """
         @brief Posts a payload to the specified destination via NSB.
         
@@ -1016,6 +1087,7 @@ class NSBSimClient(NSBClient):
         nsb_msg.metadata.src_id = src_id
         nsb_msg.metadata.dest_id = dest_id
         nsb_msg.metadata.payload_size = len(payload)
+        self.msg_set_trace(trace, nsb_msg)
         self.msg_set_payload_obj(payload, nsb_msg)
         # Send the NSB message + payload.
         self.comms._send_msg(Comms.Channels.SEND, nsb_msg.SerializeToString())
