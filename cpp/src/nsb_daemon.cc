@@ -5,6 +5,9 @@
 namespace nsb {
 
     namespace {
+        constexpr int kServerPollTimeoutMs = 10000;
+        constexpr int kWritablePollTimeoutMs = 10000;
+
         std::uint64_t steadyNowNs() {
             return static_cast<std::uint64_t>(
                 std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -38,6 +41,61 @@ namespace nsb {
             proto_trace->set_t_daemon_fetch_egress_ns(trace.t_daemon_fetch_egress_ns);
             proto_trace->set_t_daemon_post_ingress_ns(trace.t_daemon_post_ingress_ns);
             proto_trace->set_t_daemon_receive_egress_ns(trace.t_daemon_receive_egress_ns);
+        }
+
+        bool waitForWritable(int fd, const char* context) {
+            pollfd writable_fd{fd, POLLOUT, 0};
+            while (true) {
+                int ready = poll(&writable_fd, 1, kWritablePollTimeoutMs);
+                if (ready > 0) {
+                    if ((writable_fd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+                        LOG(ERROR) << context
+                                   << ": socket became unavailable while waiting to write."
+                                   << std::endl;
+                        return false;
+                    }
+                    return (writable_fd.revents & POLLOUT) != 0;
+                }
+                if (ready == 0) {
+                    LOG(ERROR) << context << ": timed out waiting for socket to become writable."
+                               << std::endl;
+                    return false;
+                }
+                if (errno == EINTR) {
+                    continue;
+                }
+                LOG(ERROR) << context << ": poll() failed while waiting for writable state: "
+                           << strerror(errno) << std::endl;
+                return false;
+            }
+        }
+
+        bool sendAll(int fd, const void* buffer, std::size_t size, const char* context) {
+            const char* bytes = static_cast<const char*>(buffer);
+            std::size_t total_sent = 0;
+            while (total_sent < size) {
+                ssize_t bytes_sent = send(fd, bytes + total_sent, size - total_sent, 0);
+                if (bytes_sent > 0) {
+                    total_sent += static_cast<std::size_t>(bytes_sent);
+                    continue;
+                }
+                if (bytes_sent == 0) {
+                    LOG(ERROR) << context << ": send() returned 0 bytes." << std::endl;
+                    return false;
+                }
+                if (errno == EINTR) {
+                    continue;
+                }
+                if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    if (!waitForWritable(fd, context)) {
+                        return false;
+                    }
+                    continue;
+                }
+                LOG(ERROR) << context << ": send() failed: " << strerror(errno) << std::endl;
+                return false;
+            }
+            return true;
         }
     }
 
@@ -130,70 +188,33 @@ namespace nsb {
         LOG(INFO) << "Server started on port " << port << std::endl;
 
         // Run server.
-        fd_set read_fds;
-        // Create vector to track client file descriptors.
-        std::vector<int> channel_fds;
+        std::vector<pollfd> poll_fds;
+        poll_fds.push_back({server_fd, POLLIN, 0});
         while (running) {
-            // Set server file descriptor.
-            FD_ZERO(&read_fds);
-            FD_SET(server_fd, &read_fds);
-            int max_fd = server_fd;
-            // Set client file descriptors.
-            for (int channel_fd : channel_fds) {
-                FD_SET(channel_fd, &read_fds);
-                max_fd = std::max(max_fd, channel_fd);
-            }
-            // Monitor select for activity on the file descriptors.
-            timeval timeout{};
-            timeout.tv_sec = 10;
-            timeout.tv_usec = 0;
-            int activity = select(max_fd + 1, &read_fds, nullptr, nullptr, &timeout);
+            int activity = poll(poll_fds.data(), poll_fds.size(), kServerPollTimeoutMs);
             if (activity < 0) {
-                // Check for errors, but excuse ones that come from non-blocking.
                 if (errno != EINTR && errno != EAGAIN && errno != EWOULDBLOCK) {
-                    perror("Select error.");
+                    LOG(ERROR) << "poll() failed in daemon main loop: " << strerror(errno)
+                               << std::endl;
                     break;
                 }
-            } else if (activity > 0) {
-                // First, monitor existing connections through client FDs.
-                for (auto it=channel_fds.begin(); it!=channel_fds.end();) {
-                    int fd = *it;
-                    // Check to see if there's action on this client FD.
-                    if (FD_ISSET(fd, &read_fds)) {
-                        bool message_exists = false;
-                        char buffer[MAX_BUFFER_SIZE];
-                        std::vector<char> message;
-                        // Read buffer until there's nothing left.
-                        int bytes_read = recv(fd, buffer, sizeof(buffer)-1, 0);
-                        while(bytes_read > 0) {
-                            message_exists = true;
-                            DLOG(INFO) << "Picked up " << bytes_read << "B from FD " << fd << "." << std::endl;
-                            message.insert(message.end(), buffer, buffer+bytes_read);
-                            bytes_read = recv(fd, buffer, sizeof(buffer)-1, 0);
-                        }
-                        if (message_exists) {
-                            DLOG(INFO) << "Received message from FD " << fd << ": " << 
-                                std::string(message.begin()+1, message.end()) << std::endl;
-                            handle_message(fd, message);
-                            ++it;
-                        }
-                        else {
-                            LOG(WARNING) << "Disconnected from FD " << fd << "." << std::endl;
-                            shutdown(fd, SHUT_WR);
-                            close(fd);
-                            channel_fds.erase(it);
-                        }
-                    }
-                    else {++it;}
-                }
-                // Then handle any new connections.
-                if (FD_ISSET(server_fd, &read_fds)) {
+                continue;
+            }
+            if (activity == 0) {
+                continue;
+            }
+
+            if ((poll_fds.front().revents & POLLIN) != 0) {
+                while (true) {
                     sockaddr_in client_addr{};
                     socklen_t client_len = sizeof(client_addr);
                     int channel_fd = accept(server_fd, (struct sockaddr*)&client_addr, &client_len);
                     if (channel_fd == -1) {
-                        LOG(ERROR) << "Accept failed." << std::endl;
-                        continue;
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                            break;
+                        }
+                        LOG(ERROR) << "Accept failed: " << strerror(errno) << std::endl;
+                        break;
                     }
                     int channel_flags = fcntl(channel_fd, F_GETFL, 0);
                     if (channel_flags == -1 ||
@@ -209,17 +230,74 @@ namespace nsb {
                             << ", Port: " << client_port << "." << std::endl;
                     // Add to the FD lookup.
                     std::string key = std::string(client_ip) + ":" + std::to_string(client_port);
-                    fd_lookup.emplace(key, channel_fd);
-                    // Add client FD to the pool of client FDs.
-                    channel_fds.push_back(channel_fd);
+                    fd_lookup.insert_or_assign(key, channel_fd);
+                    poll_fds.push_back({channel_fd, POLLIN, 0});
                 }
+            }
+
+            for (std::size_t index = 1; index < poll_fds.size();) {
+                pollfd& channel = poll_fds[index];
+                int fd = channel.fd;
+                short revents = channel.revents;
+                if (revents == 0) {
+                    ++index;
+                    continue;
+                }
+
+                bool disconnect = false;
+                if ((revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
+                    disconnect = true;
+                } else if ((revents & POLLIN) != 0) {
+                    bool message_exists = false;
+                    char buffer[MAX_BUFFER_SIZE];
+                    std::vector<char> message;
+                    while (true) {
+                        ssize_t bytes_read = recv(fd, buffer, sizeof(buffer) - 1, 0);
+                        if (bytes_read > 0) {
+                            message_exists = true;
+                            DLOG(INFO) << "Picked up " << bytes_read << "B from FD " << fd << "." << std::endl;
+                            message.insert(message.end(), buffer, buffer + bytes_read);
+                            continue;
+                        }
+                        if (bytes_read == 0) {
+                            disconnect = true;
+                            break;
+                        }
+                        if (errno == EINTR) {
+                            continue;
+                        }
+                        if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                            break;
+                        }
+                        LOG(ERROR) << "recv() failed on FD " << fd << ": " << strerror(errno)
+                                   << std::endl;
+                        disconnect = true;
+                        break;
+                    }
+
+                    if (message_exists) {
+                        DLOG(INFO) << "Received message from FD " << fd << ": "
+                                   << std::string(message.begin() + 1, message.end()) << std::endl;
+                        handle_message(fd, message);
+                    }
+                }
+
+                if (disconnect) {
+                    LOG(WARNING) << "Disconnected from FD " << fd << "." << std::endl;
+                    shutdown(fd, SHUT_WR);
+                    close(fd);
+                    poll_fds.erase(poll_fds.begin() + static_cast<std::ptrdiff_t>(index));
+                    continue;
+                }
+
+                ++index;
             }
         }
         LOG(INFO) << "Server is no longer running, closing connections..." << std::endl;
         // When running stops, close connections and close server.
-        for (int channel_fd : channel_fds) {
-            DLOG(INFO) << "Closing connection to FD " << channel_fd << "." << std::endl;
-            close(channel_fd);
+        for (std::size_t index = 1; index < poll_fds.size(); ++index) {
+            DLOG(INFO) << "Closing connection to FD " << poll_fds[index].fd << "." << std::endl;
+            close(poll_fds[index].fd);
         }
         close(server_fd);
         LOG(INFO) << "Server stopped." << std::endl;
@@ -286,7 +364,10 @@ namespace nsb {
                 return;
             }
             DLOG(INFO) << "Sending response back: (" << size << "B) " << r_buffer << std::endl;
-            send(fd, r_buffer, size, 0);
+            if (!sendAll(fd, r_buffer, size, "Failed to send daemon response")) {
+                free(r_buffer);
+                return;
+            }
             free(r_buffer);
         }
     }
@@ -387,9 +468,6 @@ namespace nsb {
             nsb::nsbm::Manifest* out_manifest = outgoing_msg->mutable_manifest();
             out_manifest->set_op(nsb::nsbm::Manifest::FORWARD);
             applyTraceToMetadata(trace, outgoing_msg->mutable_metadata());
-            // Send to sim via RECV channel.
-            fd_set write_fd;
-            FD_ZERO(&write_fd);
             // Select the target simulator if multiple simulator clients are used, else select the first and only one.
             ClientDetails target_sim;
             if (cfg.SIMULATOR_MODE == Config::SimulatorMode::SYSTEM_WIDE) {
@@ -402,32 +480,27 @@ namespace nsb {
                 LOG(ERROR) << "No simulator clients available to forward message." << std::endl;
                 return;
             }
-            FD_SET(target_sim.ch_RECV_fd, &write_fd);
-            // Check if the sim RECV channel is available.
             DLOG(INFO) << "Attempting to forward message to sim RECV channel (FD:" 
                 << target_sim.ch_RECV_fd << ")..." << std::endl;
-            if (select(target_sim.ch_RECV_fd + 1, nullptr, &write_fd, nullptr, nullptr) > 0) {
-                if (FD_ISSET(target_sim.ch_RECV_fd, &write_fd)) {
-                    outgoing_msg->mutable_metadata()->mutable_trace()->set_t_daemon_fetch_egress_ns(steadyNowNs());
-                    // Serialize the message and send it to the sim RECV channel.
-                    std::size_t size = outgoing_msg->ByteSizeLong();
-                    void* buffer = malloc(size);
-                    if (buffer == nullptr) {
-                        LOG(ERROR) << "Failed to allocate forwarding buffer." << std::endl;
-                        return;
-                    }
-                    if (!outgoing_msg->SerializeToArray(buffer, static_cast<int>(size))) {
-                        LOG(ERROR) << "Failed to serialize message for simulator forwarding." << std::endl;
-                        free(buffer);
-                        return;
-                    }
-                    send(target_sim.ch_RECV_fd, buffer, size, 0);
-                    DLOG(INFO) << "\tForwarded message to sim RECV channel (" << size << " B)" << std::endl;
-                    free(buffer);
-                }
-            } else {
-                DLOG(ERROR) << "Sim RECV channel not available for forwarding." << std::endl; 
+            outgoing_msg->mutable_metadata()->mutable_trace()->set_t_daemon_fetch_egress_ns(steadyNowNs());
+            // Serialize the message and send it to the sim RECV channel.
+            std::size_t size = outgoing_msg->ByteSizeLong();
+            void* buffer = malloc(size);
+            if (buffer == nullptr) {
+                LOG(ERROR) << "Failed to allocate forwarding buffer." << std::endl;
+                return;
             }
+            if (!outgoing_msg->SerializeToArray(buffer, static_cast<int>(size))) {
+                LOG(ERROR) << "Failed to serialize message for simulator forwarding." << std::endl;
+                free(buffer);
+                return;
+            }
+            if (!sendAll(target_sim.ch_RECV_fd, buffer, size, "Failed to forward message to simulator")) {
+                free(buffer);
+                return;
+            }
+            DLOG(INFO) << "\tForwarded message to sim RECV channel (" << size << " B)" << std::endl;
+            free(buffer);
         }
     }
 
@@ -525,37 +598,30 @@ namespace nsb {
             int target_fd = (app_client_lookup.find(dest_id) != app_client_lookup.end()) ? app_client_lookup[dest_id].ch_RECV_fd : -1;
             // Send to sim via RECV channel.
             if (target_fd != -1) {
-                fd_set write_fd;
-                FD_ZERO(&write_fd);
-                FD_SET(target_fd, &write_fd);
-                // Check if the client RECV channel is available.
                 DLOG(INFO) << "Attempting to forward message to " 
                         << dest_id << " RECV channel (FD:" 
                         << target_fd << ")..." << std::endl;
-                if (select(target_fd + 1, nullptr, &write_fd, nullptr, nullptr) > 0) {
-                    if (FD_ISSET(target_fd, &write_fd)) {
-                        outgoing_msg->mutable_metadata()->mutable_trace()->set_t_daemon_receive_egress_ns(steadyNowNs());
-                        // Serialize the message and send it to the target RECV channel.
-                        std::size_t size = outgoing_msg->ByteSizeLong();
-                        void* buffer = malloc(size);
-                        if (buffer == nullptr) {
-                            LOG(ERROR) << "Failed to allocate forwarding buffer." << std::endl;
-                            return;
-                        }
-                        if (!outgoing_msg->SerializeToArray(buffer, static_cast<int>(size))) {
-                            LOG(ERROR) << "Failed to serialize message for app forwarding." << std::endl;
-                            free(buffer);
-                            return;
-                        }
-                        send(target_fd, buffer, size, 0);
-                        DLOG(INFO) << "\tForwarded message to " 
-                                << dest_id << " RECV channel (" 
-                                << size << " B)" << std::endl;
-                        free(buffer);
-                    }
-                } else {
-                    DLOG(ERROR) << dest_id << " RECV channel not available for forwarding." << std::endl; 
+                outgoing_msg->mutable_metadata()->mutable_trace()->set_t_daemon_receive_egress_ns(steadyNowNs());
+                // Serialize the message and send it to the target RECV channel.
+                std::size_t size = outgoing_msg->ByteSizeLong();
+                void* buffer = malloc(size);
+                if (buffer == nullptr) {
+                    LOG(ERROR) << "Failed to allocate forwarding buffer." << std::endl;
+                    return;
                 }
+                if (!outgoing_msg->SerializeToArray(buffer, static_cast<int>(size))) {
+                    LOG(ERROR) << "Failed to serialize message for app forwarding." << std::endl;
+                    free(buffer);
+                    return;
+                }
+                if (!sendAll(target_fd, buffer, size, "Failed to forward message to app client")) {
+                    free(buffer);
+                    return;
+                }
+                DLOG(INFO) << "\tForwarded message to " 
+                        << dest_id << " RECV channel (" 
+                        << size << " B)" << std::endl;
+                free(buffer);
             } else {
                 DLOG(ERROR) << "No destination FD found for forwarding to " 
                             << dest_id << "." << std::endl;
