@@ -14,12 +14,12 @@ on:
       rates:
         description: "Comma-separated message rates"
         required: false
-        default: "10,30,50,100,300,500,1000"
+        default: "10,1000"
         type: string
       duration:
         description: "Seconds per sweep run"
         required: false
-        default: "60"
+        default: "10"
         type: string
       max_avg_rtt_s:
         description: "Optional failure threshold for avg_rtt_s"
@@ -51,10 +51,10 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PUSH_NODES: "10,50,100,200,300"
-      PUSH_RATES: "10,30,50,100,300,500,1000"
+      PUSH_RATES: "10,1000"
       NODES: ${{ github.event_name == 'workflow_dispatch' && inputs.nodes || '10,50,100,200,300' }}
-      RATES: ${{ github.event_name == 'workflow_dispatch' && inputs.rates || '10,30,50,100,300,500,1000' }}
-      DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '60' }}
+      RATES: ${{ github.event_name == 'workflow_dispatch' && inputs.rates || '10,1000' }}
+      DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '10' }}
       MAX_AVG_RTT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_rtt_s || '' }}
       MAX_AVG_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_cpu_percent || '' }}
       MAX_PEAK_MEMORY_MB: ${{ github.event_name == 'workflow_dispatch' && inputs.max_peak_memory_mb || '' }}

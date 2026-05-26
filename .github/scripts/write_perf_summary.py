@@ -43,13 +43,35 @@ def main() -> int:
     lines.append(f"- Passed: {passed}")
     lines.append(f"- Failed: {failed}")
     lines.append("")
+    lines.append("### Latency Metric Definitions")
+    lines.append("")
+    lines.append(
+        "- `Avg RTT (s)`: App-visible end-to-end roundtrip time from app send to app receive. "
+        "This includes NSB handling, simulator turnaround, and any harness-side delay."
+    )
+    lines.append(
+        "- `Daemon Roundtrip (s)`: Daemon-visible roundtrip time from `t_daemon_send_ingress` "
+        "to `t_daemon_receive_egress`. This is the closest daemon-side equivalent to RTT and "
+        "includes time waiting in NSB before simulator fetch, simulator turnaround, and time "
+        "waiting in NSB before app receive."
+    )
+    lines.append(
+        "- `NSB Residence (s)`: Time spent inside NSB only: "
+        "(`t_daemon_fetch_egress - t_daemon_send_ingress`) + "
+        "(`t_daemon_receive_egress - t_daemon_post_ingress`). This excludes simulator turnaround."
+    )
+    lines.append(
+        "- `Sim Turnaround (s)`: Time outside NSB between daemon handoff to the simulator and "
+        "the simulator returning the message: `t_daemon_post_ingress - t_daemon_fetch_egress`."
+    )
+    lines.append("")
 
     if not rows:
         lines.append("No performance rows were produced.")
     else:
         lines.extend(
             [
-                "| Case | Status | Sent | Received | Drop % | Errors (hash/parse/unexpected) | Avg RTT (s) | Daemon RTT (s) | NSB Residence (s) | Sim Turnaround (s) | Avg CPU % | Peak Mem (MB) |",
+                "| Case | Status | Sent | Received | Drop % | Errors (hash/parse/unexpected) | Avg RTT (s) | Daemon Roundtrip (s) | NSB Residence (s) | Sim Turnaround (s) | Avg CPU % | Peak Mem (MB) |",
                 "| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )

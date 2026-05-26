@@ -77,12 +77,7 @@ def percentile(values: List[float], p: int) -> float:
 
 
 def progress_line(sent: int, received: int, elapsed_s: float) -> str:
-    width = 30
-    ratio = (received / sent) if sent else 0.0
-    ratio = max(0.0, min(1.0, ratio))
-    filled = int(width * ratio)
-    bar = "#" * filled + "-" * (width - filled)
-    return f"[{bar}] recv={received}/{sent} ({ratio * 100.0:6.2f}%) elapsed={elapsed_s:6.1f}s"
+    return f"[PROGRESS] elapsed={elapsed_s:5.1f}s sent={sent} received={received}"
 
 
 def compute_trace_metrics(trace: TraceEntry) -> dict[str, float] | None:
@@ -236,8 +231,7 @@ def sender_worker(
             time.sleep(remaining)
 
     sender_done.set()
-    elapsed = time.perf_counter() - start
-    print(f"\n[SENDER] Done: {sent} messages in {elapsed:.2f}s ({sent / elapsed:.1f} msg/s actual)")
+    _ = time.perf_counter() - start
 
 
 def main() -> None:
@@ -292,7 +286,7 @@ def main() -> None:
     sender_thread.start()
 
     loop_start = time.perf_counter()
-    last_progress = 0.0
+    next_progress_at = 1.0
     next_recv_index = 0
 
     try:
@@ -353,10 +347,10 @@ def main() -> None:
                     last_activity_ref[0] = time.perf_counter()
 
             now = time.perf_counter()
-            if now - last_progress >= 0.2:
-                elapsed = now - loop_start
-                print(f"\r{progress_line(sent_count, received_count, elapsed)}", end="", flush=True)
-                last_progress = now
+            elapsed = now - loop_start
+            if elapsed >= next_progress_at:
+                print(progress_line(sent_count, received_count, elapsed), flush=True)
+                next_progress_at += 1.0
 
             if sender_done.is_set() and sent_count > 0 and received_count >= sent_count:
                 break
@@ -379,9 +373,6 @@ def main() -> None:
         print("\n[INTERRUPTED]")
 
     sender_thread.join(timeout=5)
-
-    elapsed = time.perf_counter() - loop_start
-    print(f"\r{progress_line(metrics.sent, metrics.received, elapsed)}")
 
     summary = metrics.as_summary()
     print("\n==== SUMMARY ====")
