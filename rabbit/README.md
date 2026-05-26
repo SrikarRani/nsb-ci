@@ -1,5 +1,35 @@
 # NSB RabbitMQ Implementation
 
+## Table of Contents
+- [Architecture Overview](#architecture-overview)
+  - [Key Architectural Advantage](#key-architectural-advantage)
+  - [Key Components](#key-components)
+  - [Queue Architecture](#queue-architecture)
+  - [Message Flow](#message-flow)
+    - [Client Initialization](#client-initialization)
+    - [Message Sending (App Client)](#message-sending-app-client)
+    - [Message Receiving (App Client)](#message-receiving-app-client)
+    - [Message Fetching (Simulator Client)](#message-fetching-simulator-client)
+- [Usage](#usage)
+  - [Starting the Daemon](#starting-the-daemon)
+  - [Creating an Application Client (RabbitMQ-only module)](#creating-an-application-client-rabbitmq-only-module)
+  - [Creating a Simulator Client (RabbitMQ-only module)](#creating-a-simulator-client-rabbitmq-only-module)
+  - [Using the Unified Client (recommended)](#using-the-unified-client-recommended)
+  - [Asynchronous Operations](#asynchronous-operations)
+- [Configuration](#configuration)
+  - [System Modes](#system-modes)
+  - [Simulator Modes](#simulator-modes)
+  - [Database Configuration](#database-configuration)
+- [Cross-Language Interoperability](#cross-language-interoperability)
+- [Architecture Differences from Socket Implementation](#architecture-differences-from-socket-implementation)
+  - [Similarities](#similarities)
+  - [Differences from Socket Implementation](#differences-from-socket-implementation)
+- [Dependencies](#dependencies)
+- [Testing](#testing)
+  - [Test Suite](#test-suite)
+  - [Examples](#examples)
+  - [Quick Inline Test](#quick-inline-test)
+
 ## Architecture Overview
 
 ### Key Architectural Advantage

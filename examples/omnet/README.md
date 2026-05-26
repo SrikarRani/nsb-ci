@@ -1,3 +1,12 @@
+## Table of Contents
+- [Installation Steps for OMNeT++](#installation-steps-for-omnet)
+- [nsb_omnet_basic](#nsb_omnet_basic)
+  - [Steps to run the OMNeT++ simulation](#steps-to-run-the-omnet-simulation)
+- [nsb_omnet_inet](#nsb_omnet_inet)
+  - [Installation Steps for INET](#installation-steps-for-inet)
+  - [Steps to run the simulation](#steps-to-run-the-simulation)
+- [Note](#note)
+
 ### **Installation Steps for OMNeT++**
 
 **Highly recommended** to install

@@ -2,6 +2,23 @@
 
 C++ 17 is required to use the client API.
 
+## Table of Contents
+- [Setting Up the Library](#setting-up-the-library)
+- [Compiling Your Project with NSB](#compiling-your-project-with-nsb)
+- [Basic API Usage](#basic-api-usage)
+  - [Notes on the C++ Implementation](#notes-on-the-c-implementation)
+    - [Representing Bytestrings as `string`](#representing-bytestrings-as-string)
+    - [The `MessageEntry` Object](#the-messageentry-object)
+  - [NSB Application Client (`NSBAppClient`)](#nsb-application-client-nsbappclient)
+    - [Sending Payloads (`send`)](#sending-payloads-send)
+    - [Receiving Payloads (`receive`)](#receiving-payloads-receive)
+  - [NSB Simulator Client (`NSBSimClient`)](#nsb-simulator-client-nsbsimclient)
+    - [Fetching Payloads for Simulation (`fetch`)](#fetching-payloads-for-simulation-fetch)
+    - [Posting an Arrived Payload (`post`)](#posting-an-arrived-payload-post)
+- [Notes](#notes)
+  - [Additional Documentation via Doxygen](#additional-documentation-via-doxygen)
+  - [Use of AI](#use-of-ai)
+
 ## Setting Up the Library
 When you build NSB with CMake, the client library is automatically compiled and 
 can be found in the _build_ directory as **libnsb.\***. Upon installation, the 
