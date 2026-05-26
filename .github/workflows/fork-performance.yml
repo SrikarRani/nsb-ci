@@ -19,7 +19,7 @@ on:
       duration:
         description: "Seconds per sweep run"
         required: false
-        default: "60"
+        default: "10"
         type: string
       max_avg_rtt_s:
         description: "Optional failure threshold for avg_rtt_s"
@@ -50,11 +50,10 @@ jobs:
     if: github.repository_owner != 'nsb-ucsc'
     runs-on: ubuntu-latest
     env:
-      PUSH_NODES: "10,50,100,500"
-      PUSH_RATES: "10,30,50,100,300,500,1000"
+      PUSH_CASES: "200:50,200:100,200:500,200:1000,300:100,300:1000,400:100,400:1000,500:50,500:100,500:500,500:1000"
       NODES: ${{ github.event_name == 'workflow_dispatch' && inputs.nodes || '10,50,100,500' }}
       RATES: ${{ github.event_name == 'workflow_dispatch' && inputs.rates || '10,30,50,100,300,500,1000' }}
-      DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '60' }}
+      DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '10' }}
       MAX_AVG_RTT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_rtt_s || '' }}
       MAX_AVG_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_cpu_percent || '' }}
       MAX_PEAK_MEMORY_MB: ${{ github.event_name == 'workflow_dispatch' && inputs.max_peak_memory_mb || '' }}
@@ -148,11 +147,10 @@ jobs:
         if: github.event_name == 'push'
         working-directory: nsb
         run: |
-          cases=$(python -c "nodes='${PUSH_NODES}'.split(','); rates='${PUSH_RATES}'.split(','); print(','.join(f'{n.strip()}:{r.strip()}' for n in nodes for r in rates if n.strip() and r.strip()))")
           python .github/scripts/run_perf_cases.py \
             --repo-root . \
             --capture-script .github/scripts/run_ghost_perf_capture.sh \
-            --cases "$cases" \
+            --cases "$PUSH_CASES" \
             --duration "$DURATION" \
             --output-root ./results \
             --summary-csv ./results/perf_summary.csv \
