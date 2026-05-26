@@ -1,0 +1,207 @@
+name: Fork Ghost Performance
+
+on:
+  push:
+    paths-ignore:
+      - "docs/**"
+  workflow_dispatch:
+    inputs:
+      nodes:
+        description: "Comma-separated node counts"
+        required: false
+        default: "10,50,100,200,300"
+        type: string
+      rates:
+        description: "Comma-separated message rates"
+        required: false
+        default: "10,30,50,100,300,500,1000"
+        type: string
+      duration:
+        description: "Seconds per sweep run"
+        required: false
+        default: "60"
+        type: string
+      max_avg_rtt_s:
+        description: "Optional failure threshold for avg_rtt_s"
+        required: false
+        default: ""
+        type: string
+      max_avg_cpu_percent:
+        description: "Optional failure threshold for avg_cpu_percent"
+        required: false
+        default: ""
+        type: string
+      max_peak_memory_mb:
+        description: "Optional failure threshold for peak_memory_mb"
+        required: false
+        default: ""
+        type: string
+      max_drop_rate_percent:
+        description: "Optional failure threshold for drop_rate_percent"
+        required: false
+        default: "0"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  perf:
+    if: github.repository_owner != 'nsb-ucsc'
+    runs-on: ubuntu-latest
+    env:
+      PUSH_NODES: "10,50,100,200,300"
+      PUSH_RATES: "10,30,50,100,300,500,1000"
+      NODES: ${{ github.event_name == 'workflow_dispatch' && inputs.nodes || '10,50,100,200,300' }}
+      RATES: ${{ github.event_name == 'workflow_dispatch' && inputs.rates || '10,30,50,100,300,500,1000' }}
+      DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '60' }}
+      MAX_AVG_RTT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_rtt_s || '' }}
+      MAX_AVG_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_cpu_percent || '' }}
+      MAX_PEAK_MEMORY_MB: ${{ github.event_name == 'workflow_dispatch' && inputs.max_peak_memory_mb || '' }}
+      MAX_DROP_RATE_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_drop_rate_percent || '0' }}
+
+    steps:
+      - name: Check out NSB
+        uses: actions/checkout@v4
+        with:
+          path: nsb
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            ninja-build \
+            pkg-config \
+            git \
+            protobuf-compiler \
+            libprotobuf-dev \
+            libyaml-cpp-dev \
+            libhiredis-dev \
+            python3-venv \
+            python3-pip
+
+      - name: Install modern Abseil on Linux
+        run: |
+          git clone --depth 1 https://github.com/abseil/abseil-cpp.git "${RUNNER_TEMP}/abseil-cpp"
+          cmake -S "${RUNNER_TEMP}/abseil-cpp" -B "${RUNNER_TEMP}/abseil-build" -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+            -DABSL_ENABLE_INSTALL=ON \
+            -DCMAKE_INSTALL_PREFIX="/usr/local"
+          cmake --build "${RUNNER_TEMP}/abseil-build"
+          sudo cmake --install "${RUNNER_TEMP}/abseil-build"
+
+      - name: Build and install NSB under /usr/local
+        working-directory: nsb
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build --config Release
+          sudo cmake --install build --config Release
+
+      - name: Capture GitHub runner specs
+        working-directory: nsb
+        run: |
+          mkdir -p results
+          {
+            echo "runner_label: ubuntu-latest"
+            echo "date_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "os_release:"
+            cat /etc/os-release
+            echo
+            echo "uname:"
+            uname -a
+            echo
+            echo "lscpu:"
+            lscpu
+            echo
+            echo "memory:"
+            free -h
+            echo
+            echo "storage:"
+            df -h .
+          } > results/runner_specs.txt
+          {
+            echo "## GitHub Runner Specs"
+            echo
+            echo "- Runner label: \`ubuntu-latest\`"
+            echo "- OS:"
+            echo '```text'
+            grep '^PRETTY_NAME=' /etc/os-release | sed 's/^PRETTY_NAME=//'
+            echo '```'
+            echo "- CPU:"
+            echo '```text'
+            lscpu | grep -E 'Model name|Architecture|CPU\\(s\\)'
+            echo '```'
+            echo "- Memory:"
+            echo '```text'
+            free -h
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Run full push ghost perf matrix
+        if: github.event_name == 'push'
+        working-directory: nsb
+        run: |
+          cases=$(python -c "nodes='${PUSH_NODES}'.split(','); rates='${PUSH_RATES}'.split(','); print(','.join(f'{n.strip()}:{r.strip()}' for n in nodes for r in rates if n.strip() and r.strip()))")
+          python .github/scripts/run_perf_cases.py \
+            --repo-root . \
+            --capture-script .github/scripts/run_ghost_perf_capture.sh \
+            --cases "$cases" \
+            --duration "$DURATION" \
+            --output-root ./results \
+            --summary-csv ./results/perf_summary.csv \
+            --capture-arg=--daemon-cmd \
+            --capture-arg=./build/nsb_daemon\ config-ghost-perf.yaml
+
+      - name: Run manual ghost performance sweep
+        if: github.event_name == 'workflow_dispatch'
+        working-directory: nsb
+        run: |
+          cases=$(python -c "nodes='${NODES}'.split(','); rates='${RATES}'.split(','); print(','.join(f'{n.strip()}:{r.strip()}' for n in nodes for r in rates if n.strip() and r.strip()))")
+          python .github/scripts/run_perf_cases.py \
+            --repo-root . \
+            --capture-script .github/scripts/run_ghost_perf_capture.sh \
+            --cases "$cases" \
+            --duration "$DURATION" \
+            --output-root ./results \
+            --summary-csv ./results/perf_summary.csv \
+            --capture-arg=--daemon-cmd \
+            --capture-arg=./build/nsb_daemon\ config-ghost-perf.yaml
+
+      - name: Generate performance plots
+        working-directory: nsb
+        run: |
+          ./.venv/bin/python -m pip install matplotlib
+          ./.venv/bin/python .github/scripts/plot_perf_metrics.py \
+            --csv ./results/perf_summary.csv \
+            --out-dir ./results/plots
+
+      - name: Write readable performance summary
+        if: always()
+        working-directory: nsb
+        run: |
+          python .github/scripts/write_perf_summary.py \
+            --csv results/perf_summary.csv \
+            --output perf-summary.md \
+            --title "NSB Ghost Performance Summary"
+          cat perf-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Enforce optional thresholds
+        run: >
+          python nsb/.github/scripts/check_perf_thresholds.py
+          nsb/results/perf_summary.csv
+
+      - name: Upload performance artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nsb-ghost-performance-${{ github.run_id }}
+          path: nsb/results
+          if-no-files-found: warn
+          retention-days: 14

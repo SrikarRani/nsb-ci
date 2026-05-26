@@ -1,7 +1,10 @@
 import socket
 import select
 import time
-import proto.nsb_pb2 as nsb_pb2
+try:
+    import nsb_proto.nsb_pb2 as nsb_pb2
+except ModuleNotFoundError:
+    import proto.nsb_pb2 as nsb_pb2
 import asyncio
 
 # Set up logging.

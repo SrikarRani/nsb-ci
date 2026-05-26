@@ -1,0 +1,9 @@
+system:
+  daemon_address: 127.0.0.1
+  daemon_port: 65432
+  mode: 0
+  simulator_mode: 0
+  log_level: info
+
+database:
+  use_db: false
