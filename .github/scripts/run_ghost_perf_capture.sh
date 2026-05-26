@@ -13,6 +13,7 @@ PYTHON_CMD_BASE="${PYTHON_CMD_BASE:-}"
 SAMPLE_INTERVAL="${SAMPLE_INTERVAL:-1}"
 STARTUP_SLEEP="${STARTUP_SLEEP:-3}"
 OUTPUT_ROOT="${OUTPUT_ROOT:-${REPO_ROOT}/results}"
+DAEMON_PORT="${DAEMON_PORT:-65432}"
 
 RUN_TAG=""
 PY_ARGS=()
@@ -146,6 +147,7 @@ cleanup() {
     kill -TERM "$SIM_PID" 2>/dev/null
     sleep 1
     kill -KILL "$SIM_PID" 2>/dev/null
+    wait "$SIM_PID" 2>/dev/null || true
   fi
 
   if [[ -n "$DAEMON_PID" ]] && kill -0 "$DAEMON_PID" 2>/dev/null; then
@@ -154,7 +156,15 @@ cleanup() {
     kill -TERM "$DAEMON_PID" 2>/dev/null
     sleep 1
     kill -KILL "$DAEMON_PID" 2>/dev/null
+    wait "$DAEMON_PID" 2>/dev/null || true
   fi
+
+  for _ in $(seq 1 20); do
+    if ! ss -ltn 2>/dev/null | awk -v port=":${DAEMON_PORT}" '$4 ~ (port "$") {found=1} END {exit found ? 0 : 1}'; then
+      break
+    fi
+    sleep 1
+  done
 }
 
 trap cleanup EXIT
@@ -223,7 +233,7 @@ run_cmd_in_dir_bg() {
   local log="$3"
   (
     cd "$dir"
-    bash -lc "$cmd"
+    bash -lc "exec $cmd"
   ) > "$log" 2>&1 &
   echo $!
 }
