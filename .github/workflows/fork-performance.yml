@@ -9,7 +9,7 @@ on:
       nodes:
         description: "Comma-separated node counts"
         required: false
-        default: "5,15,25,50,100,200"
+        default: "10,50,100,500"
         type: string
       rates:
         description: "Comma-separated message rates"
@@ -19,7 +19,7 @@ on:
       duration:
         description: "Seconds per sweep run"
         required: false
-        default: "10"
+        default: "60"
         type: string
       max_avg_rtt_s:
         description: "Optional failure threshold for avg_rtt_s"
@@ -50,11 +50,11 @@ jobs:
     if: github.repository_owner != 'nsb-ucsc'
     runs-on: ubuntu-latest
     env:
-      PUSH_NODES: "5,15,25,50,100,200"
+      PUSH_NODES: "10,50,100,500"
       PUSH_RATES: "10,30,50,100,300,500,1000"
-      NODES: ${{ github.event_name == 'workflow_dispatch' && inputs.nodes || '5' }}
-      RATES: ${{ github.event_name == 'workflow_dispatch' && inputs.rates || '10' }}
-      DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '5' }}
+      NODES: ${{ github.event_name == 'workflow_dispatch' && inputs.nodes || '10,50,100,500' }}
+      RATES: ${{ github.event_name == 'workflow_dispatch' && inputs.rates || '10,30,50,100,300,500,1000' }}
+      DURATION: ${{ github.event_name == 'workflow_dispatch' && inputs.duration || '60' }}
       MAX_AVG_RTT_S: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_rtt_s || '' }}
       MAX_AVG_CPU_PERCENT: ${{ github.event_name == 'workflow_dispatch' && inputs.max_avg_cpu_percent || '' }}
       MAX_PEAK_MEMORY_MB: ${{ github.event_name == 'workflow_dispatch' && inputs.max_peak_memory_mb || '' }}
@@ -104,6 +104,46 @@ jobs:
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
           cmake --build build --config Release
           sudo cmake --install build --config Release
+
+      - name: Capture GitHub runner specs
+        working-directory: nsb
+        run: |
+          mkdir -p results
+          {
+            echo "runner_label: ubuntu-latest"
+            echo "date_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "os_release:"
+            cat /etc/os-release
+            echo
+            echo "uname:"
+            uname -a
+            echo
+            echo "lscpu:"
+            lscpu
+            echo
+            echo "memory:"
+            free -h
+            echo
+            echo "storage:"
+            df -h .
+          } > results/runner_specs.txt
+          {
+            echo "## GitHub Runner Specs"
+            echo
+            echo "- Runner label: \`ubuntu-latest\`"
+            echo "- OS:"
+            echo '```text'
+            grep '^PRETTY_NAME=' /etc/os-release | sed 's/^PRETTY_NAME=//'
+            echo '```'
+            echo "- CPU:"
+            echo '```text'
+            lscpu | grep -E 'Model name|Architecture|CPU\\(s\\)'
+            echo '```'
+            echo "- Memory:"
+            echo '```text'
+            free -h
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Run full push ghost perf matrix
         if: github.event_name == 'push'
         working-directory: nsb
