@@ -4,6 +4,43 @@
 
 namespace nsb {
 
+    namespace {
+        std::uint64_t steadyNowNs() {
+            return static_cast<std::uint64_t>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch()
+                ).count()
+            );
+        }
+
+        MessageEntry::TraceEntry traceFromMetadata(const nsb::nsbm::Metadata& metadata) {
+            MessageEntry::TraceEntry trace;
+            if (metadata.has_trace()) {
+                const auto& proto_trace = metadata.trace();
+                trace.msg_id = proto_trace.msg_id();
+                trace.t_app_send_ns = proto_trace.t_app_send_ns();
+                trace.t_daemon_send_ingress_ns = proto_trace.t_daemon_send_ingress_ns();
+                trace.t_daemon_fetch_egress_ns = proto_trace.t_daemon_fetch_egress_ns();
+                trace.t_daemon_post_ingress_ns = proto_trace.t_daemon_post_ingress_ns();
+                trace.t_daemon_receive_egress_ns = proto_trace.t_daemon_receive_egress_ns();
+            }
+            return trace;
+        }
+
+        void applyTraceToMetadata(const MessageEntry::TraceEntry& trace, nsb::nsbm::Metadata* metadata) {
+            if (!trace.hasData()) {
+                return;
+            }
+            nsb::nsbm::Metadata::Trace* proto_trace = metadata->mutable_trace();
+            proto_trace->set_msg_id(trace.msg_id);
+            proto_trace->set_t_app_send_ns(trace.t_app_send_ns);
+            proto_trace->set_t_daemon_send_ingress_ns(trace.t_daemon_send_ingress_ns);
+            proto_trace->set_t_daemon_fetch_egress_ns(trace.t_daemon_fetch_egress_ns);
+            proto_trace->set_t_daemon_post_ingress_ns(trace.t_daemon_post_ingress_ns);
+            proto_trace->set_t_daemon_receive_egress_ns(trace.t_daemon_receive_egress_ns);
+        }
+    }
+
     NSBDaemon::NSBDaemon(int s_port, std::string filename) : running(false), server_port(s_port) {
         GOOGLE_PROTOBUF_VERIFY_VERSION;
         configure(filename);
@@ -320,10 +357,11 @@ namespace nsb {
         *response_required = false;
         LOG(INFO) << "Handling SEND message from client " 
                 << incoming_msg->intro().identifier() << " in " << std::endl;
+        nsb::nsbm::Metadata in_metadata = incoming_msg->metadata();
+        MessageEntry::TraceEntry trace = traceFromMetadata(in_metadata);
+        trace.t_daemon_send_ingress_ns = steadyNowNs();
         if (cfg.SYSTEM_MODE == Config::SystemMode::PULL) {
             LOG(INFO).NoPrefix() << "PULL mode..." << std::endl;
-            // Parse the metadata.
-            nsb::nsbm::Metadata in_metadata = incoming_msg->metadata();
             // Retrieve payload if using database, otherwise no need.
             std::string payload_obj = msg_get_payload_obj(incoming_msg);
             // Store payload.
@@ -331,7 +369,8 @@ namespace nsb {
                 in_metadata.src_id(),
                 in_metadata.dest_id(),
                 payload_obj,
-                in_metadata.payload_size()
+                in_metadata.payload_size(),
+                trace
             );
             DLOG(INFO) << "TX entry created | " 
                 << in_metadata.payload_size() << " B | src: " 
@@ -347,6 +386,7 @@ namespace nsb {
             outgoing_msg->MergeFrom(*incoming_msg);
             nsb::nsbm::Manifest* out_manifest = outgoing_msg->mutable_manifest();
             out_manifest->set_op(nsb::nsbm::Manifest::FORWARD);
+            applyTraceToMetadata(trace, outgoing_msg->mutable_metadata());
             // Send to sim via RECV channel.
             fd_set write_fd;
             FD_ZERO(&write_fd);
@@ -368,6 +408,7 @@ namespace nsb {
                 << target_sim.ch_RECV_fd << ")..." << std::endl;
             if (select(target_sim.ch_RECV_fd + 1, nullptr, &write_fd, nullptr, nullptr) > 0) {
                 if (FD_ISSET(target_sim.ch_RECV_fd, &write_fd)) {
+                    outgoing_msg->mutable_metadata()->mutable_trace()->set_t_daemon_fetch_egress_ns(steadyNowNs());
                     // Serialize the message and send it to the sim RECV channel.
                     std::size_t size = outgoing_msg->ByteSizeLong();
                     void* buffer = malloc(size);
@@ -432,6 +473,8 @@ namespace nsb {
             out_metadata->set_src_id(fetched_message.source);
             out_metadata->set_dest_id(fetched_message.destination);
             out_metadata->set_payload_size(static_cast<int>(fetched_message.payload_size));
+            fetched_message.trace.t_daemon_fetch_egress_ns = steadyNowNs();
+            applyTraceToMetadata(fetched_message.trace, out_metadata);
             msg_set_payload_obj(fetched_message.payload_obj, outgoing_msg);
         } else {
             // Otherwise, indicate no message was fetched.
@@ -444,13 +487,14 @@ namespace nsb {
         *response_required = false;
         LOG(INFO) << "Handling POST message from client " 
                 << incoming_msg->intro().identifier() << " in " << std::endl;
+        nsb::nsbm::Metadata in_metadata = incoming_msg->metadata();
+        MessageEntry::TraceEntry trace = traceFromMetadata(in_metadata);
+        trace.t_daemon_post_ingress_ns = steadyNowNs();
         if (cfg.SYSTEM_MODE == Config::SystemMode::PULL) {
             LOG(INFO).NoPrefix() << "PULL mode..." << std::endl;
             // Check for message.
             nsb::nsbm::Manifest in_manifest = incoming_msg->manifest();
             if (in_manifest.code() == nsb::nsbm::Manifest::MESSAGE) {
-                // Parse the metadata.
-                nsb::nsbm::Metadata in_metadata = incoming_msg->metadata();
                 // Retrieve payload if using database, otherwise no need.
                 std::string payload_obj = msg_get_payload_obj(incoming_msg);
                 // Store payload.
@@ -458,7 +502,8 @@ namespace nsb {
                     in_metadata.src_id(),
                     in_metadata.dest_id(),
                     payload_obj,
-                    in_metadata.payload_size()
+                    in_metadata.payload_size(),
+                    trace
                 );
                 DLOG(INFO) << "RX entry created | " 
                         << in_metadata.payload_size() << " B | src: " 
@@ -474,6 +519,7 @@ namespace nsb {
             outgoing_msg->MergeFrom(*incoming_msg);
             nsb::nsbm::Manifest* out_manifest = outgoing_msg->mutable_manifest();
             out_manifest->set_op(nsb::nsbm::Manifest::FORWARD);
+            applyTraceToMetadata(trace, outgoing_msg->mutable_metadata());
             // Get the destination to forward to.
             std::string dest_id = incoming_msg->metadata().dest_id();
             int target_fd = (app_client_lookup.find(dest_id) != app_client_lookup.end()) ? app_client_lookup[dest_id].ch_RECV_fd : -1;
@@ -488,6 +534,7 @@ namespace nsb {
                         << target_fd << ")..." << std::endl;
                 if (select(target_fd + 1, nullptr, &write_fd, nullptr, nullptr) > 0) {
                     if (FD_ISSET(target_fd, &write_fd)) {
+                        outgoing_msg->mutable_metadata()->mutable_trace()->set_t_daemon_receive_egress_ns(steadyNowNs());
                         // Serialize the message and send it to the target RECV channel.
                         std::size_t size = outgoing_msg->ByteSizeLong();
                         void* buffer = malloc(size);
@@ -559,6 +606,8 @@ namespace nsb {
             out_metadata->set_src_id(received_message.source);
             out_metadata->set_dest_id(received_message.destination);
             out_metadata->set_payload_size(static_cast<int>(received_message.payload_size));
+            received_message.trace.t_daemon_receive_egress_ns = steadyNowNs();
+            applyTraceToMetadata(received_message.trace, out_metadata);
             msg_set_payload_obj(received_message.payload_obj, outgoing_msg);
         } else {
             // Otherwise, indicate no message found.

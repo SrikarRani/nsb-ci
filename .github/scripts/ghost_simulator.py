@@ -99,7 +99,7 @@ def run(args: argparse.Namespace) -> int:
                     if not msg:
                         continue
                     payload = getattr(msg, "payload", b"") or b""
-                    sim.post(msg.src_id, msg.dest_id, payload)
+                    sim.post(msg.src_id, msg.dest_id, payload, trace=getattr(msg, "trace", None))
                     relayed += 1
                     relayed_this_pass += 1
                     if relayed % 50 == 0:
@@ -108,7 +108,7 @@ def run(args: argparse.Namespace) -> int:
                 msg = sim.fetch(timeout=args.fetch_timeout)
                 if msg:
                     payload = getattr(msg, "payload", b"") or b""
-                    sim.post(msg.src_id, msg.dest_id, payload)
+                    sim.post(msg.src_id, msg.dest_id, payload, trace=getattr(msg, "trace", None))
                     relayed += 1
                     relayed_this_pass += 1
                     if relayed % 50 == 0:

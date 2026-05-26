@@ -29,7 +29,8 @@ namespace nsb {
     public:
         NSBAppClient(const std::string& identifier, std::string& serverAddress, int serverPort);
         ~NSBAppClient();
-        std::string send(const std::string destId, std::string payload);
+        std::string send(const std::string destId, std::string payload,
+                         const MessageEntry::TraceEntry* trace = nullptr);
         /**
          * @brief Receives a payload via NSB.
          * 
@@ -95,7 +96,8 @@ namespace nsb {
             }
         }
         MessageEntry listenFetch();
-        std::string post(std::string srcId, std::string destId, std::string &payload);
+        std::string post(std::string srcId, std::string destId, std::string &payload,
+                         const MessageEntry::TraceEntry* trace = nullptr);
     };
 }
 

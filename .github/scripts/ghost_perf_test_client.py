@@ -29,7 +29,7 @@ PYTHON_DIR = REPO_ROOT / "python"
 if str(PYTHON_DIR) not in sys.path:
     sys.path.insert(0, str(PYTHON_DIR))
 
-from nsb_client import NSBAppClient  # noqa: E402
+from nsb_client import NSBAppClient, TraceEntry  # noqa: E402
 
 
 def random_string(length: int = 24) -> str:
@@ -85,6 +85,32 @@ def progress_line(sent: int, received: int, elapsed_s: float) -> str:
     return f"[{bar}] recv={received}/{sent} ({ratio * 100.0:6.2f}%) elapsed={elapsed_s:6.1f}s"
 
 
+def compute_trace_metrics(trace: TraceEntry) -> dict[str, float] | None:
+    values = (
+        trace.t_daemon_send_ingress_ns,
+        trace.t_daemon_fetch_egress_ns,
+        trace.t_daemon_post_ingress_ns,
+        trace.t_daemon_receive_egress_ns,
+    )
+    if any(value <= 0 for value in values):
+        return None
+
+    outbound_ns = trace.t_daemon_fetch_egress_ns - trace.t_daemon_send_ingress_ns
+    sim_turnaround_ns = trace.t_daemon_post_ingress_ns - trace.t_daemon_fetch_egress_ns
+    return_ns = trace.t_daemon_receive_egress_ns - trace.t_daemon_post_ingress_ns
+    daemon_roundtrip_ns = trace.t_daemon_receive_egress_ns - trace.t_daemon_send_ingress_ns
+    nsb_residence_ns = outbound_ns + return_ns
+
+    if min(outbound_ns, sim_turnaround_ns, return_ns, daemon_roundtrip_ns, nsb_residence_ns) < 0:
+        return None
+
+    return {
+        "daemon_roundtrip_s": daemon_roundtrip_ns / 1_000_000_000.0,
+        "nsb_residence_s": nsb_residence_ns / 1_000_000_000.0,
+        "sim_turnaround_s": sim_turnaround_ns / 1_000_000_000.0,
+    }
+
+
 @dataclass
 class Metrics:
     rate: int
@@ -95,6 +121,10 @@ class Metrics:
     parse_failures: int = 0
     unexpected_msgs: int = 0
     rtt_s: List[float] = field(default_factory=list)
+    trace_samples: int = 0
+    daemon_roundtrip_s: List[float] = field(default_factory=list)
+    nsb_residence_s: List[float] = field(default_factory=list)
+    sim_turnaround_s: List[float] = field(default_factory=list)
 
     def as_summary(self) -> dict:
         dropped = max(0, self.sent - self.received)
@@ -116,6 +146,25 @@ class Metrics:
             "rtt_p99_s": percentile(self.rtt_s, 99),
             "rtt_min_s": min(self.rtt_s) if self.rtt_s else 0.0,
             "rtt_max_s": max(self.rtt_s) if self.rtt_s else 0.0,
+            "trace_samples": self.trace_samples,
+            "daemon_roundtrip_avg_s": mean(self.daemon_roundtrip_s) if self.daemon_roundtrip_s else 0.0,
+            "daemon_roundtrip_p50_s": percentile(self.daemon_roundtrip_s, 50),
+            "daemon_roundtrip_p95_s": percentile(self.daemon_roundtrip_s, 95),
+            "daemon_roundtrip_p99_s": percentile(self.daemon_roundtrip_s, 99),
+            "daemon_roundtrip_min_s": min(self.daemon_roundtrip_s) if self.daemon_roundtrip_s else 0.0,
+            "daemon_roundtrip_max_s": max(self.daemon_roundtrip_s) if self.daemon_roundtrip_s else 0.0,
+            "nsb_residence_avg_s": mean(self.nsb_residence_s) if self.nsb_residence_s else 0.0,
+            "nsb_residence_p50_s": percentile(self.nsb_residence_s, 50),
+            "nsb_residence_p95_s": percentile(self.nsb_residence_s, 95),
+            "nsb_residence_p99_s": percentile(self.nsb_residence_s, 99),
+            "nsb_residence_min_s": min(self.nsb_residence_s) if self.nsb_residence_s else 0.0,
+            "nsb_residence_max_s": max(self.nsb_residence_s) if self.nsb_residence_s else 0.0,
+            "sim_turnaround_avg_s": mean(self.sim_turnaround_s) if self.sim_turnaround_s else 0.0,
+            "sim_turnaround_p50_s": percentile(self.sim_turnaround_s, 50),
+            "sim_turnaround_p95_s": percentile(self.sim_turnaround_s, 95),
+            "sim_turnaround_p99_s": percentile(self.sim_turnaround_s, 99),
+            "sim_turnaround_min_s": min(self.sim_turnaround_s) if self.sim_turnaround_s else 0.0,
+            "sim_turnaround_max_s": max(self.sim_turnaround_s) if self.sim_turnaround_s else 0.0,
         }
 
 
@@ -161,11 +210,16 @@ def sender_worker(
             p_hash = payload_hash(payload_text)
 
             send_ts = time.perf_counter()
+            send_ts_ns = time.perf_counter_ns()
             try:
                 with state_lock:
                     sent_tracker[msg_id] = {"send_ts": send_ts, "payload_hash": p_hash}
                     metrics.sent += 1
-                sender_client.send(receiver_host, encoded)
+                sender_client.send(
+                    receiver_host,
+                    encoded,
+                    trace=TraceEntry(msg_id=msg_id, t_app_send_ns=send_ts_ns),
+                )
                 time.sleep(0.0001)
                 sent += 1
                 sequence += 1
@@ -290,6 +344,12 @@ def main() -> None:
                     received_ids.add(msg_id)
                     metrics.received += 1
                     metrics.rtt_s.append(rtt)
+                    trace_metrics = compute_trace_metrics(getattr(received, "trace", TraceEntry()))
+                    if trace_metrics is not None:
+                        metrics.trace_samples += 1
+                        metrics.daemon_roundtrip_s.append(trace_metrics["daemon_roundtrip_s"])
+                        metrics.nsb_residence_s.append(trace_metrics["nsb_residence_s"])
+                        metrics.sim_turnaround_s.append(trace_metrics["sim_turnaround_s"])
                     last_activity_ref[0] = time.perf_counter()
 
             now = time.perf_counter()
@@ -342,6 +402,35 @@ def main() -> None:
         )
         print(
             f"            min={summary['rtt_min_s']:.4f}s  max={summary['rtt_max_s']:.4f}s"
+        )
+    if summary["trace_samples"] > 0:
+        print(f"  trace:    samples={summary['trace_samples']}")
+        print(
+            f"  daemon:   avg={summary['daemon_roundtrip_avg_s']:.4f}s  "
+            f"p50={summary['daemon_roundtrip_p50_s']:.4f}s  p95={summary['daemon_roundtrip_p95_s']:.4f}s  "
+            f"p99={summary['daemon_roundtrip_p99_s']:.4f}s"
+        )
+        print(
+            f"            min={summary['daemon_roundtrip_min_s']:.4f}s  "
+            f"max={summary['daemon_roundtrip_max_s']:.4f}s"
+        )
+        print(
+            f"  nsb:      avg={summary['nsb_residence_avg_s']:.4f}s  "
+            f"p50={summary['nsb_residence_p50_s']:.4f}s  p95={summary['nsb_residence_p95_s']:.4f}s  "
+            f"p99={summary['nsb_residence_p99_s']:.4f}s"
+        )
+        print(
+            f"            min={summary['nsb_residence_min_s']:.4f}s  "
+            f"max={summary['nsb_residence_max_s']:.4f}s"
+        )
+        print(
+            f"  sim:      avg={summary['sim_turnaround_avg_s']:.4f}s  "
+            f"p50={summary['sim_turnaround_p50_s']:.4f}s  p95={summary['sim_turnaround_p95_s']:.4f}s  "
+            f"p99={summary['sim_turnaround_p99_s']:.4f}s"
+        )
+        print(
+            f"            min={summary['sim_turnaround_min_s']:.4f}s  "
+            f"max={summary['sim_turnaround_max_s']:.4f}s"
         )
     print("=================")
 

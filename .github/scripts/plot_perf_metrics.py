@@ -32,6 +32,9 @@ def load_rows(csv_path: str):
             nodes = to_float(row.get("nodes"))
             rate = to_float(row.get("rate"))
             avg_rtt = to_float(row.get("avg_rtt_s"))
+            daemon_roundtrip = to_float(row.get("daemon_roundtrip_avg_s"))
+            nsb_residence = to_float(row.get("nsb_residence_avg_s"))
+            sim_turnaround = to_float(row.get("sim_turnaround_avg_s"))
             avg_cpu = to_float(row.get("avg_cpu_percent"))
             peak_mem = to_float(row.get("peak_memory_mb"))
             drop_rate = to_float(row.get("drop_rate_percent"))
@@ -42,6 +45,9 @@ def load_rows(csv_path: str):
                     "nodes": int(nodes),
                     "rate": int(rate),
                     "avg_rtt_s": avg_rtt,
+                    "daemon_roundtrip_avg_s": daemon_roundtrip,
+                    "nsb_residence_avg_s": nsb_residence,
+                    "sim_turnaround_avg_s": sim_turnaround,
                     "avg_cpu_percent": avg_cpu,
                     "peak_memory_mb": peak_mem,
                     "drop_rate_percent": drop_rate,
@@ -99,6 +105,27 @@ def main() -> None:
         y_label="Average RTT (s)",
         title="Average RTT vs Message Rate",
         out_path=os.path.join(args.out_dir, "avg_rtt_vs_rate.png"),
+    )
+    plot_metric(
+        rows,
+        metric_key="daemon_roundtrip_avg_s",
+        y_label="Daemon Roundtrip (s)",
+        title="Average Daemon Roundtrip vs Message Rate",
+        out_path=os.path.join(args.out_dir, "daemon_roundtrip_vs_rate.png"),
+    )
+    plot_metric(
+        rows,
+        metric_key="nsb_residence_avg_s",
+        y_label="NSB Residence (s)",
+        title="Average NSB Residence vs Message Rate",
+        out_path=os.path.join(args.out_dir, "nsb_residence_vs_rate.png"),
+    )
+    plot_metric(
+        rows,
+        metric_key="sim_turnaround_avg_s",
+        y_label="Simulator Turnaround (s)",
+        title="Average Simulator Turnaround vs Message Rate",
+        out_path=os.path.join(args.out_dir, "sim_turnaround_vs_rate.png"),
     )
     plot_metric(
         rows,

@@ -49,8 +49,8 @@ def main() -> int:
     else:
         lines.extend(
             [
-                "| Case | Status | Sent | Received | Drop % | Errors (hash/parse/unexpected) | Avg RTT (s) | P95 RTT (s) | Avg CPU % | Peak Mem (MB) |",
-                "| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |",
+                "| Case | Status | Sent | Received | Drop % | Errors (hash/parse/unexpected) | Avg RTT (s) | Daemon RTT (s) | NSB Residence (s) | Sim Turnaround (s) | Avg CPU % | Peak Mem (MB) |",
+                "| --- | --- | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
             ]
         )
         for row in rows:
@@ -60,9 +60,22 @@ def main() -> int:
             )
             complete = all(
                 row.get(field, "NA") != "NA"
-                for field in ("sent", "received", "dropped", "drop_rate_percent")
+                for field in (
+                    "sent",
+                    "received",
+                    "dropped",
+                    "drop_rate_percent",
+                    "trace_samples",
+                    "daemon_roundtrip_avg_s",
+                    "nsb_residence_avg_s",
+                    "sim_turnaround_avg_s",
+                )
             )
-            status = "PASS" if row.get("exit_code") == "0" and complete else "FAIL"
+            status = (
+                "PASS"
+                if row.get("exit_code") == "0" and complete and row.get("trace_samples") != "0"
+                else "FAIL"
+            )
             errors = (
                 f"{row.get('hash_failures', 'NA')}/"
                 f"{row.get('parse_failures', 'NA')}/"
@@ -79,7 +92,9 @@ def main() -> int:
                         row.get("drop_rate_percent", "NA"),
                         errors,
                         row.get("avg_rtt_s", "NA"),
-                        row.get("p95_rtt_s", "NA"),
+                        row.get("daemon_roundtrip_avg_s", "NA"),
+                        row.get("nsb_residence_avg_s", "NA"),
+                        row.get("sim_turnaround_avg_s", "NA"),
                         row.get("avg_cpu_percent", "NA"),
                         row.get("peak_memory_mb", "NA"),
                     ]

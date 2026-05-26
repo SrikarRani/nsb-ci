@@ -41,6 +41,17 @@ message nsbm {
         string src_id = 1;
         string dest_id = 2;
         int32 payload_size = 3;
+
+        message Trace {
+            string msg_id = 1;
+            uint64 t_app_send_ns = 2;
+            uint64 t_daemon_send_ingress_ns = 3;
+            uint64 t_daemon_fetch_egress_ns = 4;
+            uint64 t_daemon_post_ingress_ns = 5;
+            uint64 t_daemon_receive_egress_ns = 6;
+        }
+
+        Trace trace = 4;
     }
     Metadata metadata = 2;
 
