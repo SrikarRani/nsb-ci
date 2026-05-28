@@ -8,10 +8,10 @@ except ModuleNotFoundError:
     import proto.nsb_pb2 as nsb_pb2
 import asyncio
 
-# Set up logging.
 import logging
 from enum import IntEnum
 import threading
+import struct
 
 import redis
 
@@ -264,12 +264,11 @@ class SocketInterface(Comms):
             conn.close()
 
     def _wait_for_socket(self, channel: Comms.Channels, events: int, timeout: Optional[float] = None) -> bool:
-        selector = selectors.DefaultSelector()
-        try:
-            selector.register(self.conns[channel], events)
-            return bool(selector.select(timeout))
-        finally:
-            selector.close()
+        poller = select.poll()
+        poll_event = select.POLLIN if events == selectors.EVENT_READ else select.POLLOUT
+        poller.register(self.conns[channel], poll_event)
+        ms_timeout = int(timeout * 1000) if timeout is not None else None
+        return bool(poller.poll(ms_timeout))
 
     def _send_msg(self, channel:Comms.Channels, message:bytes):
         """
@@ -287,7 +286,8 @@ class SocketInterface(Comms):
         if not self._wait_for_socket(channel, selectors.EVENT_WRITE):
             raise RuntimeError("Socket not ready to send, cannot send message.")
 
-        payload = memoryview(message)
+        framed_message = struct.pack('!I', len(message)) + message
+        payload = memoryview(framed_message)
         while len(payload):
             try:
                 bytes_sent = self.conns[channel].send(payload[:SEND_BUFFER_SIZE])
@@ -310,28 +310,40 @@ class SocketInterface(Comms):
         @param timeout Maximum time in seconds to wait for a response from the
                        server. If None, it will wait indefinitely.
         """
-        if not self._wait_for_socket(channel, selectors.EVENT_READ, timeout):
-            self.logger.error(f"Timed out after {timeout} seconds.")
-            return None
-
-        data = b''
-        while True:
+        header = b''
+        while len(header) < 4:
+            if not self._wait_for_socket(channel, selectors.EVENT_READ, timeout):
+                self.logger.debug(f"Timed out after {timeout} seconds.")
+                return None
             try:
-                chunk = self.conns[channel].recv(RECEIVE_BUFFER_SIZE)
-                data += chunk
+                chunk = self.conns[channel].recv(4 - len(header))
                 if len(chunk) == 0:
-                    return data if len(data) else None
-                if len(chunk) < RECEIVE_BUFFER_SIZE:
-                    return data if len(data) else None
-                if not self._wait_for_socket(channel, selectors.EVENT_READ, 0):
-                    return data if len(data) else None
+                    return None
+                header += chunk
             except (BlockingIOError, InterruptedError):
-                if not self._wait_for_socket(channel, selectors.EVENT_READ, 0):
-                    return data if len(data) else None
+                continue
             except socket.error as e:
                 print(f"Socket error: {e}")
                 return None
-        return None
+                
+        msg_size = struct.unpack('!I', header)[0]
+        
+        data = b''
+        while len(data) < msg_size:
+            if not self._wait_for_socket(channel, selectors.EVENT_READ, timeout):
+                continue
+            try:
+                bytes_to_read = min(msg_size - len(data), RECEIVE_BUFFER_SIZE)
+                chunk = self.conns[channel].recv(bytes_to_read)
+                if len(chunk) == 0:
+                    return None
+                data += chunk
+            except (BlockingIOError, InterruptedError):
+                continue
+            except socket.error as e:
+                print(f"Socket error: {e}")
+                return None
+        return data
     
     async def _listen_msg(self, channel:Comms.Channels):
         """
@@ -345,23 +357,31 @@ class SocketInterface(Comms):
         @param timeout Maximum time in seconds to wait for a response from the
                        server. If None, it will wait indefinitely.
         """
-        data = b''
-        while True:
+        header = b''
+        while len(header) < 4:
             try:
-                chunk = await asyncio.get_event_loop().sock_recv(self.conns[channel], RECEIVE_BUFFER_SIZE)
-                data += chunk
-                # If chunk is less than the buffer size, we're done.
+                chunk = await asyncio.get_event_loop().sock_recv(self.conns[channel], 4 - len(header))
                 if len(chunk) == 0:
-                    return data if len(data) else None
-                if len(chunk) < RECEIVE_BUFFER_SIZE:
-                    return data if len(data) else None
-                # Otherwise, poll to see if there's more waiting.
-                else:
-                    if not self._wait_for_socket(channel, selectors.EVENT_READ, 0):
-                        return data if len(data) else None
+                    return None
+                header += chunk
             except socket.error as e:
                 print(f"Socket error: {e}")
                 return None
+                
+        msg_size = struct.unpack('!I', header)[0]
+        
+        data = b''
+        while len(data) < msg_size:
+            try:
+                bytes_to_read = min(msg_size - len(data), RECEIVE_BUFFER_SIZE)
+                chunk = await asyncio.get_event_loop().sock_recv(self.conns[channel], bytes_to_read)
+                if len(chunk) == 0:
+                    return None
+                data += chunk
+            except socket.error as e:
+                print(f"Socket error: {e}")
+                return None
+        return data
     
     def __del__(self):
         """

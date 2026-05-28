@@ -106,6 +106,8 @@ namespace nsb {
         std::map<std::string, ClientDetails> app_client_lookup;
         /** @brief A mapping of "address:port" strings to their file descriptors. */
         std::map<std::string, int> fd_lookup;
+        /** @brief A mapping of file descriptors to their partial TCP streams for length-prefix framing. */
+        std::map<int, std::vector<char>> connection_buffers;
         /**
          * @brief Transmission buffer to store sent payloads waiting to be fetched.
          * 

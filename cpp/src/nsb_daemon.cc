@@ -1,6 +1,7 @@
 // nsb_daemon.cc
 
 #include "nsb_daemon.h"
+#include <cstring>
 
 namespace nsb {
 
@@ -248,15 +249,12 @@ namespace nsb {
                 if ((revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
                     disconnect = true;
                 } else if ((revents & POLLIN) != 0) {
-                    bool message_exists = false;
                     char buffer[MAX_BUFFER_SIZE];
-                    std::vector<char> message;
                     while (true) {
-                        ssize_t bytes_read = recv(fd, buffer, sizeof(buffer) - 1, 0);
+                        ssize_t bytes_read = recv(fd, buffer, sizeof(buffer), 0);
                         if (bytes_read > 0) {
-                            message_exists = true;
                             DLOG(INFO) << "Picked up " << bytes_read << "B from FD " << fd << "." << std::endl;
-                            message.insert(message.end(), buffer, buffer + bytes_read);
+                            connection_buffers[fd].insert(connection_buffers[fd].end(), buffer, buffer + bytes_read);
                             continue;
                         }
                         if (bytes_read == 0) {
@@ -275,10 +273,21 @@ namespace nsb {
                         break;
                     }
 
-                    if (message_exists) {
-                        DLOG(INFO) << "Received message from FD " << fd << ": "
-                                   << std::string(message.begin() + 1, message.end()) << std::endl;
-                        handle_message(fd, message);
+                    while (connection_buffers[fd].size() >= 4) {
+                        uint32_t msg_size_net;
+                        std::memcpy(&msg_size_net, connection_buffers[fd].data(), 4);
+                        uint32_t msg_size = ntohl(msg_size_net);
+
+                        if (connection_buffers[fd].size() >= 4 + msg_size) {
+                            std::vector<char> message(connection_buffers[fd].begin() + 4, connection_buffers[fd].begin() + 4 + msg_size);
+                            connection_buffers[fd].erase(connection_buffers[fd].begin(), connection_buffers[fd].begin() + 4 + msg_size);
+                            
+                            DLOG(INFO) << "Received message from FD " << fd << ": "
+                                       << std::string(message.begin(), message.end()) << std::endl;
+                            handle_message(fd, message);
+                        } else {
+                            break;
+                        }
                     }
                 }
 
@@ -286,6 +295,7 @@ namespace nsb {
                     LOG(WARNING) << "Disconnected from FD " << fd << "." << std::endl;
                     shutdown(fd, SHUT_WR);
                     close(fd);
+                    connection_buffers.erase(fd);
                     poll_fds.erase(poll_fds.begin() + static_cast<std::ptrdiff_t>(index));
                     continue;
                 }
