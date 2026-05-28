@@ -307,6 +307,7 @@ namespace nsb {
          */
         std::future<std::string> listenForMessage(Comms::Channel channel, int* timeout);
         std::map<Channel, int> conns;
+        std::map<Channel, std::vector<char>> connection_buffers;
     private:
         std::string serverAddress;
         int serverPort;

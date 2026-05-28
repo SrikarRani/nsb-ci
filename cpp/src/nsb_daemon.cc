@@ -72,10 +72,17 @@ namespace nsb {
         }
 
         bool sendAll(int fd, const void* buffer, std::size_t size, const char* context) {
-            const char* bytes = static_cast<const char*>(buffer);
+            std::vector<char> framed_buffer;
+            uint32_t net_len = htonl(static_cast<uint32_t>(size));
+            framed_buffer.reserve(4 + size);
+            framed_buffer.insert(framed_buffer.end(), reinterpret_cast<const char*>(&net_len), reinterpret_cast<const char*>(&net_len) + 4);
+            framed_buffer.insert(framed_buffer.end(), static_cast<const char*>(buffer), static_cast<const char*>(buffer) + size);
+            
+            const char* bytes = framed_buffer.data();
             std::size_t total_sent = 0;
-            while (total_sent < size) {
-                ssize_t bytes_sent = send(fd, bytes + total_sent, size - total_sent, 0);
+            std::size_t total_size = framed_buffer.size();
+            while (total_sent < total_size) {
+                ssize_t bytes_sent = send(fd, bytes + total_sent, total_size - total_sent, 0);
                 if (bytes_sent > 0) {
                     total_sent += static_cast<std::size_t>(bytes_sent);
                     continue;

@@ -1,6 +1,7 @@
 // nsb.cc
 
 #include "nsb.h"
+#include <cstring>
 
 namespace nsb {
 
@@ -93,10 +94,16 @@ namespace nsb {
     }
 
     int SocketInterface::sendMessage(Comms::Channel channel, const std::string& message) {
+        uint32_t net_len = htonl(message.size());
+        std::string framed_message;
+        framed_message.reserve(4 + message.size());
+        framed_message.append(reinterpret_cast<const char*>(&net_len), 4);
+        framed_message.append(message);
+        
         int totalBytesSent = 0;
-        int totalSize = message.size();
+        int totalSize = framed_message.size();
         while (totalBytesSent < totalSize) {
-            int bytesSent = send(conns.at(channel), message.data() + totalBytesSent, totalSize - totalBytesSent, 0);
+            int bytesSent = send(conns.at(channel), framed_message.data() + totalBytesSent, totalSize - totalBytesSent, 0);
             if (bytesSent < 0) {
                 if (errno == EAGAIN || errno == EWOULDBLOCK) {
                     // May not be read to send yet.
@@ -113,14 +120,11 @@ namespace nsb {
 
     std::string SocketInterface::receiveMessage(Comms::Channel channel, int* timeout) {
         int* fdPtr = &conns.at(channel);
-        // Set up FD for select.
-        fd_set readFDs;
-        FD_ZERO(&readFDs);
-        FD_SET(*fdPtr, &readFDs);
+        auto& buffer_vec = connection_buffers[channel];
+        
         // Set up data stores.
-        std::string message;
         char buffer[RECEIVE_BUFFER_SIZE];
-        bool messageExists = false;
+        
         // Wait for messages.
         timeval* t;
         if (timeout == nullptr) {
@@ -132,6 +136,22 @@ namespace nsb {
             t = &timeoutVal;
         }
         while (true) {
+            if (buffer_vec.size() >= 4) {
+                uint32_t msg_size_net;
+                std::memcpy(&msg_size_net, buffer_vec.data(), 4);
+                uint32_t msg_size = ntohl(msg_size_net);
+                if (buffer_vec.size() >= 4 + msg_size) {
+                    std::string message(buffer_vec.begin() + 4, buffer_vec.begin() + 4 + msg_size);
+                    buffer_vec.erase(buffer_vec.begin(), buffer_vec.begin() + 4 + msg_size);
+                    return message;
+                }
+            }
+            
+            // Set up FD for select.
+            fd_set readFDs;
+            FD_ZERO(&readFDs);
+            FD_SET(*fdPtr, &readFDs);
+
             int activity = select(*fdPtr + 1, &readFDs, nullptr, nullptr, t);
             if (activity < 0) {
                 LOG(ERROR) << "Select error: " << strerror(errno) << std::endl;
@@ -141,14 +161,13 @@ namespace nsb {
                 return std::string();
             } else {
                 // Read buffer until there's nothing left.
-                int bytesRead = recv(*fdPtr, buffer, RECEIVE_BUFFER_SIZE-1, 0);
-                while (bytesRead > 0) {
-                    messageExists = true;
-                    message.append(buffer, bytesRead);
-                    bytesRead = recv(*fdPtr, buffer, RECEIVE_BUFFER_SIZE-1, 0);
+                int bytesRead = recv(*fdPtr, buffer, RECEIVE_BUFFER_SIZE, 0);
+                if (bytesRead == 0) {
+                    return std::string();
                 }
-                if (messageExists) {
-                    return message;
+                while (bytesRead > 0) {
+                    buffer_vec.insert(buffer_vec.end(), buffer, buffer + bytesRead);
+                    bytesRead = recv(*fdPtr, buffer, RECEIVE_BUFFER_SIZE, 0);
                 }
             }
         }
