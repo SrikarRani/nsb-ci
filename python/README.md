@@ -15,14 +15,18 @@
 - [Additional Documentation via Doxygen](#additional-documentation-via-doxygen)
 
 ## Adding the Client Module
-_Installable Python package coming soon._
+Installable package artifacts can now be built from this repo after the protobuf
+stubs are generated as part of the top-level CMake build, and the fork package
+workflow automates that process for GitHub Actions.
 
 To access the client module, we recommend directly just copying the contents 
 of this directory to your Python project and use it as a module within your 
 project.
 
 If you want to install the package in development mode and want it to be 
-accessible to other project spaces, you can install it. From this directory:
+accessible to other project spaces, first build NSB once from the repo root so
+that `python/nsb_proto/nsb_pb2.py` is generated, then install it from this
+directory:
 ```bash
 pip install -e .
 ```
