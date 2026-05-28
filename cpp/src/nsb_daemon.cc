@@ -158,6 +158,13 @@ namespace nsb {
                         LOG(ERROR) << "Accept failed." << std::endl;
                         continue;
                     }
+                    int channel_flags = fcntl(channel_fd, F_GETFL, 0);
+                    if (channel_flags == -1 ||
+                        fcntl(channel_fd, F_SETFL, channel_flags | O_NONBLOCK) == -1) {
+                        LOG(ERROR) << "Failed to set accepted channel to non-blocking." << std::endl;
+                        close(channel_fd);
+                        continue;
+                    }
                     char client_ip[INET_ADDRSTRLEN];
                     inet_ntop(AF_INET, &(client_addr.sin_addr), client_ip, INET_ADDRSTRLEN);
                     int client_port = ntohs(client_addr.sin_port);
@@ -183,15 +190,14 @@ namespace nsb {
 
     void NSBDaemon::handle_message(int fd, std::vector<char> message) {
         nsb::nsbm nsb_message;
-        if (!nsb_message.ParseFromArray(message.data(), message.size())) {
-            LOG(WARNING) << "ParseFromArray failed for nsb_message";
-        };
+        if (!nsb_message.ParseFromArray(message.data(), static_cast<int>(message.size()))) {
+            LOG(ERROR) << "Failed to parse incoming protobuf message from FD " << fd << "." << std::endl;
+            return;
+        }
         nsb::nsbm::Manifest manifest = nsb_message.manifest();
         DLOG(INFO) << "Manifest " << nsb::nsbm::Manifest::Operation_Name(manifest.op()) << "<--" 
                    << nsb::nsbm::Manifest::Originator_Name(manifest.og())
                    << " received from FD " << fd << "." << std::endl;
-        // Get message fields.
-        //nsb::nsbm::Metadata metadata = nsb_message.metadata();
         // Prepare template for response.
         nsb::nsbm nsb_response;
         nsb::nsbm::Manifest* r_manifest = nsb_response.mutable_manifest();
@@ -233,11 +239,18 @@ namespace nsb {
         if (response_required) {
             std::size_t size = nsb_response.ByteSizeLong();
             void* r_buffer = malloc(size);
-            if (!nsb_response.SerializeToArray(r_buffer, size)) {
-                LOG(WARNING) << "SerializeToArray failed for nsb_response";
+            if (r_buffer == nullptr) {
+                LOG(ERROR) << "Failed to allocate response buffer." << std::endl;
+                return;
+            }
+            if (!nsb_response.SerializeToArray(r_buffer, static_cast<int>(size))) {
+                LOG(ERROR) << "Failed to serialize daemon response." << std::endl;
+                free(r_buffer);
+                return;
             }
             DLOG(INFO) << "Sending response back: (" << size << "B) " << r_buffer << std::endl;
             send(fd, r_buffer, size, 0);
+            free(r_buffer);
         }
     }
 
@@ -358,8 +371,14 @@ namespace nsb {
                     // Serialize the message and send it to the sim RECV channel.
                     std::size_t size = outgoing_msg->ByteSizeLong();
                     void* buffer = malloc(size);
-                    if (!outgoing_msg->SerializeToArray(buffer, size)) {
-                        LOG(WARNING) << "SerializeToArray failed for outgoing_msg";
+                    if (buffer == nullptr) {
+                        LOG(ERROR) << "Failed to allocate forwarding buffer." << std::endl;
+                        return;
+                    }
+                    if (!outgoing_msg->SerializeToArray(buffer, static_cast<int>(size))) {
+                        LOG(ERROR) << "Failed to serialize message for simulator forwarding." << std::endl;
+                        free(buffer);
+                        return;
                     }
                     send(target_sim.ch_RECV_fd, buffer, size, 0);
                     DLOG(INFO) << "\tForwarded message to sim RECV channel (" << size << " B)" << std::endl;
@@ -378,7 +397,7 @@ namespace nsb {
         // Check to see if source has been specified.
         if (incoming_msg->has_metadata()) {
             nsb::nsbm::Metadata in_metadata = incoming_msg->metadata();
-            if (in_metadata.has_src_id()) {
+            if (!in_metadata.src_id().empty()) {
                 // Search for the message in the buffer.
                 auto it = std::find_if(tx_buffer.begin(), tx_buffer.end(),
                           [&](const auto& msg) { return msg.source == in_metadata.src_id(); });
@@ -472,8 +491,14 @@ namespace nsb {
                         // Serialize the message and send it to the target RECV channel.
                         std::size_t size = outgoing_msg->ByteSizeLong();
                         void* buffer = malloc(size);
-                        if (!outgoing_msg->SerializeToArray(buffer, size)) {
-                            LOG(WARNING) << "SerializeToArray failed for outgoing_msg";
+                        if (buffer == nullptr) {
+                            LOG(ERROR) << "Failed to allocate forwarding buffer." << std::endl;
+                            return;
+                        }
+                        if (!outgoing_msg->SerializeToArray(buffer, static_cast<int>(size))) {
+                            LOG(ERROR) << "Failed to serialize message for app forwarding." << std::endl;
+                            free(buffer);
+                            return;
                         }
                         send(target_fd, buffer, size, 0);
                         DLOG(INFO) << "\tForwarded message to " 
@@ -498,7 +523,7 @@ namespace nsb {
         // Check for destination.
         if (incoming_msg->has_metadata()) {
             nsb::nsbm::Metadata in_metadata = incoming_msg->metadata();
-            if (in_metadata.has_dest_id()) {
+            if (!in_metadata.dest_id().empty()) {
                 // Search for the message in the buffer.
                 auto it = std::find_if(rx_buffer.begin(), rx_buffer.end(),
                           [&](const auto& msg) { return msg.destination == in_metadata.dest_id(); });
